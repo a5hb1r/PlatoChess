@@ -1,0 +1,45 @@
+{
+  "name": "PlatoChess Studio",
+  "short_name": "Platochess",
+  "description": "Elevate your chess game with AI-powered training, tactical puzzles, opening repertoire builder, and personalized coaching.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "orientation": "any",
+  "scope": "/",
+  "categories": ["games", "education", "entertainment"],
+  "lang": "en-US",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Play Chess",
+      "short_name": "Play",
+      "description": "Start a new chess game",
+      "url": "/play",
+      "icons": [{ "src": "/logo.png", "sizes": "512x512", "type": "image/png" }]
+    },
+    {
+      "name": "Puzzles",
+      "short_name": "Puzzles",
+      "description": "Practice tactical puzzles",
+      "url": "/puzzles",
+      "icons": [{ "src": "/logo.png", "sizes": "512x512", "type": "image/png" }]
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
+}

@@ -1,0 +1,104 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Source+Sans+3:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 6%;
+    --foreground: 0 0% 96%;
+
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 94%;
+
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 94%;
+
+    --primary: 0 0% 94%;
+    --primary-foreground: 0 0% 6%;
+
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 88%;
+
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 55%;
+
+    --accent: 0 0% 20%;
+    --accent-foreground: 0 0% 96%;
+
+    --destructive: 0 55% 42%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 0 0% 72%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 82%;
+    --sidebar-primary: 0 0% 88%;
+    --sidebar-primary-foreground: 0 0% 6%;
+    --sidebar-accent: 0 0% 14%;
+    --sidebar-accent-foreground: 0 0% 88%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 0 0% 72%;
+
+    /* Monochrome + board (overridable via ThemeContext / data-board-theme) */
+    --ivory: 0 0% 94%;
+    --walnut: 0 0% 6%;
+    --gold: 0 0% 72%;
+    --gold-glow: 0 0% 82%;
+    --warm-gray: 0 0% 14%;
+    --chess-light: 0 0% 88%;
+    --chess-dark: 0 0% 32%;
+
+    --font-display: 'Playfair Display', serif;
+    --font-body: 'Source Sans 3', sans-serif;
+
+    --gradient-gold: linear-gradient(135deg, hsl(0 0% 92%), hsl(0 0% 68%));
+    --gradient-brand: linear-gradient(135deg, hsl(0 0% 96%), hsl(0 0% 62%));
+    --gradient-dark: linear-gradient(180deg, hsl(0 0% 6%), hsl(0 0% 4%));
+    --shadow-gold: 0 4px 24px -4px hsl(0 0% 100% / 0.12);
+    --shadow-elevated: 0 8px 30px -8px hsl(0 0% 0% / 0.55);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+}
+
+@layer utilities {
+  .text-gradient-gold,
+  .text-gradient-brand {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .bg-gradient-gold,
+  .bg-gradient-brand {
+    background: var(--gradient-brand);
+  }
+
+  .shadow-gold {
+    box-shadow: var(--shadow-gold);
+  }
+
+  .shadow-elevated {
+    box-shadow: var(--shadow-elevated);
+  }
+}

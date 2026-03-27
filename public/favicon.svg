@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Platochess">
+  <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
+  <g fill="none" stroke="#fafafa" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 8l5 3.5v2H11v-2L16 8z"/>
+    <path d="M12 14.5h8"/>
+    <path d="M13 14.5v9M16 14.5v9M19 14.5v9"/>
+    <path d="M11 23.5h10"/>
+  </g>
+  <path fill="#fafafa" d="M16 15.2c-.9 0-1.5.55-1.5 1.35s.6 1.35 1.5 1.35 1.5-.55 1.5-1.35-.6-1.35-1.5-1.35z"/>
+</svg>
