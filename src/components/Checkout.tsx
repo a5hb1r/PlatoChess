@@ -7,6 +7,8 @@ import {
 } from '@stripe/react-stripe-js'
 import { stripePromise } from '@/lib/stripe'
 import { X } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
+import { supabase } from '@/integrations/supabase/client'
 
 interface CheckoutProps {
   productId: string
@@ -14,15 +16,26 @@ interface CheckoutProps {
 }
 
 export default function Checkout({ productId, onClose }: CheckoutProps) {
+  const { user } = useAuth()
   const [error, setError] = useState<string | null>(null)
 
   const fetchClientSecret = useCallback(async () => {
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
       const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
         body: JSON.stringify({
           productId,
+          userEmail: user?.email,
           successUrl: `${window.location.origin}/`,
           cancelUrl: `${window.location.origin}/`,
         }),
@@ -39,7 +52,7 @@ export default function Checkout({ productId, onClose }: CheckoutProps) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
       throw err
     }
-  }, [productId])
+  }, [productId, user?.email, user?.id])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">

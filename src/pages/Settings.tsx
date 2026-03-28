@@ -93,9 +93,17 @@ const Settings = () => {
 
     setLoadingPortal(true);
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       const response = await fetch("/api/create-portal-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
         body: JSON.stringify({
           email: user.email,
           returnUrl: window.location.origin + "/settings",

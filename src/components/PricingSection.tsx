@@ -2,6 +2,7 @@ import { useState, lazy, Suspense } from "react";
 import { motion } from "framer-motion";
 import { Check } from "lucide-react";
 import { PRODUCTS } from "@/lib/products";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Checkout = lazy(() => import("./Checkout"));
 
@@ -16,11 +17,16 @@ const cardVariants = {
 };
 
 const PricingSection = () => {
+  const { user } = useAuth();
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
 
   const handlePlanClick = (productId: string) => {
     // Free plan doesn't need checkout
     if (productId === "free") {
+      window.location.href = "/auth";
+      return;
+    }
+    if (!user) {
       window.location.href = "/auth";
       return;
     }
