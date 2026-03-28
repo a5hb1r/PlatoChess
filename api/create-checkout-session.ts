@@ -54,6 +54,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!product) {
       return res.status(400).json({ error: `Product with id "${productId}" not found` })
     }
+    if (product.mode === 'subscription' && !userId) {
+      return res.status(401).json({ error: 'Sign in is required to subscribe' })
+    }
 
     let customerId: string | undefined
     if (userId && hasSupabaseAdminEnv()) {

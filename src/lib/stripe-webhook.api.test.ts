@@ -255,6 +255,27 @@ describe('stripe webhook + subscription handlers', () => {
     expect(res.payload).toEqual({ clientSecret: 'cs_test_123' })
   })
 
+  it('checkout rejects subscription when user is unauthenticated', async () => {
+    authGetUserMock.mockResolvedValue({
+      data: { user: null },
+      error: { message: 'invalid token' },
+    })
+
+    const { default: checkoutHandler } = await import('../../api/create-checkout-session')
+    const req: MockReq = {
+      method: 'POST',
+      body: { productId: 'pro-monthly' },
+      headers: {},
+    }
+    const res = createRes()
+
+    await checkoutHandler(req as never, res as never)
+
+    expect(checkoutSessionCreateMock).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(401)
+    expect(res.payload).toEqual({ error: 'Sign in is required to subscribe' })
+  })
+
   it('portal resolves customer id from profile for authenticated user', async () => {
     authGetUserMock.mockResolvedValue({
       data: { user: { id: 'user_abc', email: 'member@example.com' } },
