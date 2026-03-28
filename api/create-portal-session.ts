@@ -1,5 +1,7 @@
 import Stripe from 'stripe'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { getSupabaseAdminClient, hasSupabaseAdminEnv } from './_lib/supabase-admin'
+import { resolveAuthenticatedUser } from './_lib/resolve-auth-user'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
 
@@ -15,11 +17,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       email?: string
       returnUrl?: string
     }
+    const authedUser = await resolveAuthenticatedUser(req)
+    const userId = authedUser?.id
 
     let resolvedCustomerId = customerId
-    if (!resolvedCustomerId && email) {
+    if (!resolvedCustomerId && userId && hasSupabaseAdminEnv()) {
+      const supabase = getSupabaseAdminClient()
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('stripe_customer_id')
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Failed to resolve Stripe customer from profile:', error)
+      } else {
+        resolvedCustomerId = data?.stripe_customer_id || undefined
+      }
+    }
+
+    if (!resolvedCustomerId && (authedUser?.email || email)) {
       const customers = await stripe.customers.list({
-        email,
+        email: authedUser?.email || email,
         limit: 1,
       })
       resolvedCustomerId = customers.data[0]?.id
