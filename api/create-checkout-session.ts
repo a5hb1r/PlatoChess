@@ -1,5 +1,7 @@
 import Stripe from 'stripe'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { getSupabaseAdminClient, hasSupabaseAdminEnv } from './_lib/supabase-admin'
+import { resolveAuthenticatedUser } from './_lib/resolve-auth-user'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
 
@@ -42,11 +44,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { productId, successUrl, cancelUrl } = req.body
+    const { productId } = req.body as {
+      productId?: string
+    }
+    const authedUser = await resolveAuthenticatedUser(req)
+    const userId = authedUser?.id
 
     const product = PRODUCTS.find((p) => p.id === productId)
     if (!product) {
       return res.status(400).json({ error: `Product with id "${productId}" not found` })
+    }
+
+    let customerId: string | undefined
+    if (userId && hasSupabaseAdminEnv()) {
+      const supabase = getSupabaseAdminClient()
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('stripe_customer_id')
+        .eq('user_id', userId)
+        .maybeSingle()
+
+      if (error) {
+        console.error('Failed to resolve Stripe customer from profile:', error)
+      } else {
+        customerId = data?.stripe_customer_id || undefined
+      }
     }
 
     const priceData: Stripe.Checkout.SessionCreateParams.LineItem.PriceData = {
@@ -75,8 +97,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
       ],
       mode: product.mode,
+      customer: customerId,
+      customer_email: customerId ? undefined : authedUser?.email || undefined,
+      metadata: userId
+        ? {
+            user_id: userId,
+            product_id: product.id,
+          }
+        : undefined,
+      subscription_data:
+        product.mode === 'subscription' && userId
+          ? {
+              metadata: {
+                user_id: userId,
+                product_id: product.id,
+              },
+            }
+          : undefined,
       redirect_on_completion: 'never',
     })
+
+    if (userId && typeof session.customer === 'string' && hasSupabaseAdminEnv()) {
+      const supabase = getSupabaseAdminClient()
+      const { error } = await supabase
+        .from('profiles')
+        .update({ stripe_customer_id: session.customer })
+        .eq('user_id', userId)
+
+      if (error) {
+        console.error('Failed to persist Stripe customer on profile:', error)
+      }
+    }
 
     return res.status(200).json({ clientSecret: session.client_secret })
   } catch (error) {
