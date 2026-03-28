@@ -72,6 +72,8 @@ const Game = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const difficultyParam = parseInt(searchParams.get("level") || "2");
+  const modeParam = (searchParams.get("mode") || "practice").toLowerCase();
+  const isPracticeMode = modeParam !== "online";
   const difficulty = DIFFICULTY_LEVELS[Math.min(difficultyParam, DIFFICULTY_LEVELS.length - 1)];
   const coach = parseCoachId(searchParams.get("coach"));
   const [coachLine, setCoachLine] = useState<string | null>(null);
@@ -149,7 +151,7 @@ const Game = () => {
 
   // Run eval (skip while Stockfish is searching a move - avoids canceling / corrupting `getBestMove`)
   useEffect(() => {
-    if (!engineReady || !engineRef.current || engineError) return;
+    if (!isPracticeMode || !engineReady || !engineRef.current || engineError) return;
     const fen = viewFen || gameFen;
     const side = new Chess(fen).turn();
     if (!viewFen && side === "b") return;
@@ -161,7 +163,7 @@ const Game = () => {
       }
       if (info.depth) setEvalDepth(info.depth);
     });
-  }, [gameFen, viewFen, engineReady, engineError]);
+  }, [gameFen, viewFen, engineReady, engineError, isPracticeMode]);
 
   // Check game over
   useEffect(() => {
@@ -655,25 +657,30 @@ const Game = () => {
 
           {/* Center - Board + Eval bar */}
           <div className="lg:col-span-6 flex flex-col items-center order-1 lg:order-2">
-            <div className="flex w-full max-w-[600px] gap-2">
+            <div className={`flex w-full max-w-[600px] ${isPracticeMode ? "gap-2" : ""}`}>
               {/* Eval bar */}
-              <div className="w-6 rounded-lg overflow-hidden border border-border bg-muted flex flex-col-reverse relative">
-                <motion.div
-                  className="bg-ivory"
-                  animate={{ height: `${whitePercent}%` }}
-                  transition={{ duration: 0.4, ease: "easeOut" }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span
-                    className={`font-mono text-[9px] font-bold ${
-                      eval_ >= 0 ? "text-foreground" : "text-muted-foreground"
-                    }`}
-                    style={{ writingMode: "vertical-lr", transform: "rotate(180deg)" }}
-                  >
-                    {evalDisplay}
-                  </span>
+              {isPracticeMode && (
+                <div
+                  data-testid="eval-bar"
+                  className="w-6 rounded-lg overflow-hidden border border-border bg-muted flex flex-col-reverse relative"
+                >
+                  <motion.div
+                    className="bg-ivory"
+                    animate={{ height: `${whitePercent}%` }}
+                    transition={{ duration: 0.4, ease: "easeOut" }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span
+                      className={`font-mono text-[9px] font-bold ${
+                        eval_ >= 0 ? "text-foreground" : "text-muted-foreground"
+                      }`}
+                      style={{ writingMode: "vertical-lr", transform: "rotate(180deg)" }}
+                    >
+                      {evalDisplay}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Board */}
               <div className="flex-1 relative rounded-lg overflow-hidden border border-border shadow-elevated">
@@ -913,13 +920,17 @@ const Game = () => {
             </div>
 
             {/* Eval info */}
-            <div className="mt-2 font-body text-xs text-muted-foreground text-center">
-              {engineLabel}  -  Eval: {evalDisplay}  -  Depth: {evalDepth}
-            </div>
-            {engineError && (
-              <p className="mt-2 max-w-md mx-auto text-center text-sm text-destructive font-body">
-                Engine failed to load: {engineError}
-              </p>
+            {isPracticeMode && (
+              <>
+                <div className="mt-2 font-body text-xs text-muted-foreground text-center">
+                  {engineLabel}  -  Eval: {evalDisplay}  -  Depth: {evalDepth}
+                </div>
+                {engineError && (
+                  <p className="mt-2 max-w-md mx-auto text-center text-sm text-destructive font-body">
+                    Engine failed to load: {engineError}
+                  </p>
+                )}
+              </>
             )}
           </div>
 
@@ -998,15 +1009,17 @@ const Game = () => {
               </div>
 
               {/* Live analysis indicator */}
-              <div className="mt-4 pt-4 border-t border-border flex justify-between items-center">
-                <div className="font-body text-xs text-muted-foreground flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-foreground/50 animate-pulse" />
-                  Live Analysis
+              {isPracticeMode && (
+                <div className="mt-4 pt-4 border-t border-border flex justify-between items-center">
+                  <div className="font-body text-xs text-muted-foreground flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-foreground/50 animate-pulse" />
+                    Live Analysis
+                  </div>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    d{evalDepth}
+                  </span>
                 </div>
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  d{evalDepth}
-                </span>
-              </div>
+              )}
             </div>
           </div>
         </div>
