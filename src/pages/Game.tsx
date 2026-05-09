@@ -10,7 +10,6 @@ import {
   User,
   Bot,
   Loader2,
-  BarChart3,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Chess, Square, PieceSymbol } from "chess.js";
@@ -23,19 +22,12 @@ import {
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
 import { BoardThemeSelect } from "@/components/BoardThemeSelect";
 import { PIECE_URLS } from "@/lib/chess-constants";
-import { rateMoveLikeChessCom } from "@/lib/move-rating";
 import {
   type CoachId,
-  coachOnMoveRating,
   coachOnEval,
   COACHES,
 } from "@/lib/philosopher-coaches";
 import { reviewTone } from "@/lib/review-colors";
-import {
-  saveLatestGameReview,
-  scoreForLabel,
-  type ReviewedPly,
-} from "@/lib/game-review";
 
 const DIFFICULTY_LEVELS = [
   { label: "Beginner", skill: 1, depth: 4, rating: "~400" },
@@ -68,6 +60,21 @@ function getSquareFromPoint(
   return `${String.fromCharCode(97 + col)}${8 - row}` as Square;
 }
 
+function summarizeResultLabel(result: string): string {
+  const normalized = result.toLowerCase();
+  if (normalized.includes("checkmate")) return "Checkmate";
+  if (normalized.includes("stalemate")) return "Stalemate";
+  if (normalized.includes("draw")) return "Draw";
+  return "Game over";
+}
+
+function eloPulseForResult(result: string, skillLevel: number): number {
+  const baseSwing = Math.max(8, Math.round(8 + skillLevel * 0.65));
+  if (result.startsWith("White wins")) return baseSwing;
+  if (result.startsWith("Black wins")) return -Math.max(6, Math.round(baseSwing * 0.8));
+  return 0;
+}
+
 const Game = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -83,10 +90,6 @@ const Game = () => {
   const [moveHistory, setMoveHistory] = useState<
     { san: string; rating?: { label: string; color: string }; cpLoss?: number; bestUci?: string }[]
   >([]);
-  const [reviewingGame, setReviewingGame] = useState(false);
-  const [reviewProgress, setReviewProgress] = useState(0);
-  const [reviewSummary, setReviewSummary] = useState<string | null>(null);
-  const [reviewReady, setReviewReady] = useState(false);
   const [eval_, setEval_] = useState<number>(0);
   const [evalDepth, setEvalDepth] = useState(0);
   const [engineReady, setEngineReady] = useState(false);
@@ -110,6 +113,7 @@ const Game = () => {
   } | null>(null);
   const [dragOver, setDragOver] = useState<Square | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  const gameOverActionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const engineRef = useRef<StockfishEngine | null>(null);
   const gameRef = useRef(game);
@@ -224,10 +228,9 @@ const Game = () => {
       setCoachLine("I am ready. Play with intention, and I will annotate the ideas behind each move.");
       return;
     }
-    if (reviewingGame) return;
     const last = moveHistory[moveHistory.length - 1];
     setCoachLine(coachOnEval(coach, eval_, null, last?.san ?? null, moveHistory.length * 13));
-  }, [coach, moveHistory, eval_, reviewingGame]);
+  }, [coach, moveHistory, eval_]);
 
   const executeMove = useCallback((from: Square, to: Square, promotion?: string) => {
     const g = new Chess(game.fen());
@@ -368,7 +371,7 @@ const Game = () => {
     };
   }, [dragging, executeMove, game, validMoves]);
 
-  const resetGame = () => {
+  const resetGame = useCallback(() => {
     setGame(new Chess());
     setSelectedSquare(null);
     setValidMoves([]);
@@ -381,9 +384,7 @@ const Game = () => {
     setPromotionSquare(null);
     setDragging(null);
     setCoachLine(null);
-    setReviewSummary(null);
-    setReviewReady(false);
-  };
+  }, []);
 
   const goToMove = (index: number) => {
     const fullHistory = game.history();
@@ -416,89 +417,6 @@ const Game = () => {
     }
   };
 
-  const analyzeFinishedGame = useCallback(async () => {
-    if (!engineRef.current || !gameOver || reviewingGame) return;
-    const history = game.history({ verbose: true });
-    if (history.length === 0) return;
-
-    setReviewingGame(true);
-    setReviewProgress(0);
-    setReviewSummary(null);
-
-    try {
-      const engine = engineRef.current;
-      const replay = new Chess();
-      let beforeProbe = await engine.probeEval(replay.fen(), 10, 2500);
-      const reviewed: { san: string; rating?: { label: string; color: string }; cpLoss?: number; bestUci?: string }[] = [];
-      const reviewedPlies: ReviewedPly[] = [];
-
-      for (let i = 0; i < history.length; i++) {
-        const mv = history[i];
-        const side = replay.turn();
-        const fenBefore = replay.fen();
-        const best = await engine.getBestMove(fenBefore, 10);
-
-        replay.move(mv);
-        const afterProbe = await engine.probeEval(replay.fen(), 10, 2500);
-        const rated = rateMoveLikeChessCom(side, beforeProbe, afterProbe, mv, best || undefined);
-        reviewed.push({
-          san: mv.san,
-          rating: { label: rated.label, color: rated.color },
-          cpLoss: rated.cpLoss,
-          bestUci: rated.bestMove,
-        });
-        reviewedPlies.push({
-          ply: i + 1,
-          side,
-          san: mv.san,
-          label: rated.label,
-          colorClass: rated.color,
-          cpLoss: rated.cpLoss,
-          bestUci: rated.bestMove,
-          playedUci: `${mv.from}${mv.to}${mv.promotion ?? ""}`,
-          fenBefore,
-          fenAfter: replay.fen(),
-        });
-        beforeProbe = afterProbe;
-        setReviewProgress(i + 1);
-      }
-
-      const summary = reviewed.reduce<Record<string, number>>((acc, m) => {
-        const k = m.rating?.label || "Unrated";
-        acc[k] = (acc[k] || 0) + 1;
-        return acc;
-      }, {});
-      const top = ["Brilliant", "Great", "Best", "Excellent", "Good", "Inaccuracy", "Miss", "Mistake", "Blunder"]
-        .filter((k) => summary[k])
-        .map((k) => `${k}: ${summary[k]}`)
-        .join("  |  ");
-
-      setMoveHistory(reviewed);
-      setReviewSummary(top || "Review complete.");
-      setReviewReady(true);
-      const bySide = { w: [] as number[], b: [] as number[] };
-      for (const m of reviewedPlies) bySide[m.side].push(scoreForLabel(m.label));
-      const avg = (a: number[]) => (a.length ? (a.reduce((s, x) => s + x, 0) / a.length) * 100 : 0);
-      saveLatestGameReview({
-        createdAt: Date.now(),
-        pgn: game.pgn(),
-        result: gameOver || "Game complete",
-        engine: engineLabel,
-        depth: 10,
-        accuracy: {
-          w: Number(avg(bySide.w).toFixed(1)),
-          b: Number(avg(bySide.b).toFixed(1)),
-        },
-        moves: reviewedPlies,
-      });
-      if (coach !== "none") {
-        setCoachLine(coachOnMoveRating(coach, "Good", "analysis", Date.now()));
-      }
-    } finally {
-      setReviewingGame(false);
-    }
-  }, [coach, engineLabel, game, gameOver, reviewingGame]);
-
   const displayFen = viewFen || game.fen();
   const displayGame = new Chess(displayFen);
 
@@ -511,6 +429,95 @@ const Game = () => {
         ? "M" + (eval_ === 9999 ? "" : Math.abs(eval_))
         : "-M"
       : (eval_ / 100).toFixed(1);
+
+  const eloPulse = useMemo(
+    () => (gameOver ? eloPulseForResult(gameOver, difficulty.skill) : 0),
+    [difficulty.skill, gameOver]
+  );
+  const resultSummary = useMemo(
+    () =>
+      gameOver
+        ? `${summarizeResultLabel(gameOver)} - ${eloPulse > 0 ? `+${eloPulse}` : `${eloPulse}`} Elo`
+        : null,
+    [eloPulse, gameOver]
+  );
+  const gameOutcome = useMemo(() => {
+    if (!gameOver) return "Game complete";
+    if (gameOver.startsWith("White wins")) return "Victory";
+    if (gameOver.startsWith("Black wins")) return "Defeat";
+    return "Draw";
+  }, [gameOver]);
+
+  const handleAnalyzeAction = useCallback(() => {
+    if (!gameOver) return;
+    navigate("/analyze", {
+      state: {
+        pgn: game.pgn(),
+        source: "end-of-game-overlay",
+      },
+    });
+  }, [game, gameOver, navigate]);
+
+  const handleNewOpponentAction = useCallback(() => {
+    navigate("/play");
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!gameOver) return;
+    const focusFirstAction = requestAnimationFrame(() => {
+      gameOverActionRefs.current[0]?.focus();
+    });
+
+    const onOverlayKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "a") {
+        event.preventDefault();
+        handleAnalyzeAction();
+        return;
+      }
+      if (key === "r") {
+        event.preventDefault();
+        resetGame();
+        return;
+      }
+      if (key === "n") {
+        event.preventDefault();
+        handleNewOpponentAction();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const actions = gameOverActionRefs.current.filter(
+        (btn): btn is HTMLButtonElement => Boolean(btn)
+      );
+      if (!actions.length) return;
+
+      event.preventDefault();
+      const currentIndex = actions.findIndex((btn) => btn === document.activeElement);
+      if (currentIndex === -1) {
+        actions[0].focus();
+        return;
+      }
+      const delta = event.shiftKey ? -1 : 1;
+      const nextIndex = (currentIndex + delta + actions.length) % actions.length;
+      actions[nextIndex].focus();
+    };
+
+    window.addEventListener("keydown", onOverlayKeyDown);
+    return () => {
+      cancelAnimationFrame(focusFirstAction);
+      window.removeEventListener("keydown", onOverlayKeyDown);
+    };
+  }, [gameOver, handleAnalyzeAction, handleNewOpponentAction, resetGame]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -600,42 +607,6 @@ const Game = () => {
             </button>
 
             <BoardThemeSelect />
-
-            {gameOver && (
-              <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-                <button
-                  onClick={analyzeFinishedGame}
-                  disabled={reviewingGame || !engineReady || !!engineError}
-                  className="w-full py-2.5 bg-primary rounded-md font-body text-xs font-semibold text-primary-foreground disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {reviewingGame ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Reviewing {reviewProgress}/{game.history().length}
-                    </>
-                  ) : (
-                    <>
-                      <BarChart3 className="w-3.5 h-3.5" />
-                      Analyze Completed Game
-                    </>
-                  )}
-                </button>
-                <p className="font-body text-[11px] text-muted-foreground">
-                  Move ratings stay hidden during play and appear only after this review, similar to Chess.com.
-                </p>
-                {reviewSummary && (
-                  <p className="font-body text-[11px] text-foreground/80 leading-relaxed">{reviewSummary}</p>
-                )}
-                {reviewReady && (
-                  <button
-                    onClick={() => navigate("/analyze-game")}
-                    className="w-full py-2.5 border border-border rounded-md font-body text-xs font-semibold text-foreground hover:bg-secondary transition-colors"
-                  >
-                    Open Full Analysis
-                  </button>
-                )}
-              </div>
-            )}
 
             {coach !== "none" && (
               <div className="rounded-lg border border-border bg-card p-4 space-y-2">
@@ -841,46 +812,65 @@ const Game = () => {
                   )}
                 </AnimatePresence>
 
-                {/* Game over overlay */}
-                <AnimatePresence>
-                  {gameOver && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute inset-0 z-50 bg-background/85 backdrop-blur-sm flex flex-col items-center justify-center gap-4"
+                {gameOver && (
+                  <div className="absolute inset-0 z-[70] flex items-center justify-center bg-background/78 p-4 backdrop-blur-md">
+                    <section
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="end-game-title"
+                      className="w-full max-w-md rounded-2xl border border-border/80 bg-card/95 p-5 shadow-elevated"
                     >
-                      <Trophy className="w-12 h-12 text-foreground/80" />
-                      <p className="font-display text-2xl font-bold text-foreground">
-                        {gameOver}
+                      <p className="font-body text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                        Match Complete
                       </p>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
+                      <h2 id="end-game-title" className="mt-1 font-display text-3xl font-semibold text-foreground">
+                        {gameOutcome}
+                      </h2>
+                      <p className="mt-2 font-body text-base font-medium text-foreground/90">{resultSummary}</p>
+                      <div className="mt-5 grid gap-2">
                         <button
-                          onClick={async () => {
-                            if (!reviewReady && !reviewingGame) await analyzeFinishedGame();
-                            navigate("/analyze-game");
+                          ref={(node) => {
+                            gameOverActionRefs.current[0] = node;
                           }}
-                          disabled={reviewingGame || !engineReady || !!engineError}
-                          className="bg-card border border-border px-4 py-2 rounded-md font-body text-sm font-semibold text-foreground hover:bg-secondary transition-colors disabled:opacity-60"
+                          type="button"
+                          onClick={handleAnalyzeAction}
+                          className="group w-full rounded-lg bg-primary px-4 py-3 text-left font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform duration-150 hover:scale-[1.01] focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
                         >
-                          {reviewingGame ? `Analyzing ${reviewProgress}/${game.history().length}` : "Analyze Game"}
+                          <span className="flex items-center justify-between">
+                            Game Analysis
+                            <span className="text-[11px] font-mono opacity-85">A</span>
+                          </span>
                         </button>
                         <button
+                          ref={(node) => {
+                            gameOverActionRefs.current[1] = node;
+                          }}
+                          type="button"
                           onClick={resetGame}
-                          className="bg-primary px-6 py-2.5 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
+                          className="w-full rounded-lg border border-border bg-card px-4 py-3 text-left font-body text-sm font-semibold text-foreground transition-transform duration-150 hover:scale-[1.01] hover:bg-secondary/70 focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
                         >
-                          Play Again
+                          <span className="flex items-center justify-between">
+                            Rematch
+                            <span className="text-[11px] font-mono text-muted-foreground">R</span>
+                          </span>
                         </button>
                         <button
-                          onClick={() => navigate("/play")}
-                          className="bg-card border border-border px-4 py-2 rounded-md font-body text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+                          ref={(node) => {
+                            gameOverActionRefs.current[2] = node;
+                          }}
+                          type="button"
+                          onClick={handleNewOpponentAction}
+                          className="w-full rounded-lg border border-border bg-card px-4 py-3 text-left font-body text-sm font-semibold text-foreground transition-transform duration-150 hover:scale-[1.01] hover:bg-secondary/70 focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
                         >
-                          Go to Menu
+                          <span className="flex items-center justify-between">
+                            New Opponent
+                            <span className="text-[11px] font-mono text-muted-foreground">N</span>
+                          </span>
                         </button>
                       </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                    </section>
+                  </div>
+                )}
               </div>
             </div>
 
