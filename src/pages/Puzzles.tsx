@@ -626,10 +626,18 @@ const Puzzles = () => {
     const personalized = mapPersonalizedPuzzles();
     return [...personalized, ...PUZZLES];
   }, []);
+  const countsByCategory = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const puzzle of allPuzzles) {
+      counts.set(puzzle.category, (counts.get(puzzle.category) ?? 0) + 1);
+    }
+    return counts;
+  }, [allPuzzles]);
 
-  const filteredPuzzles = category === "all"
-    ? allPuzzles
-    : allPuzzles.filter((p) => p.category === category);
+  const filteredPuzzles = useMemo(
+    () => (category === "all" ? allPuzzles : allPuzzles.filter((p) => p.category === category)),
+    [allPuzzles, category]
+  );
 
   const activePuzzles = filteredPuzzles.length > 0 ? filteredPuzzles : allPuzzles;
   const currentPuzzle = activePuzzles[puzzleIndex % activePuzzles.length];
@@ -897,7 +905,7 @@ const Puzzles = () => {
                   const count =
                     cat.id === "all"
                       ? allPuzzles.length
-                      : allPuzzles.filter((p) => p.category === cat.id).length;
+                      : (countsByCategory.get(cat.id) ?? 0);
                   return (
                     <button
                       key={cat.id}
@@ -1004,15 +1012,15 @@ const Puzzles = () => {
                       {isLastMoveSquare && (
                         <div
                           className={`absolute inset-0 ${
-                            isDark ? "bg-foreground/18" : "bg-foreground/15"
+                            isDark ? "bg-amber-200/30" : "bg-amber-300/35"
                           }`}
                         />
                       )}
                       {isSelected && (
-                        <div className="absolute inset-0 bg-foreground/25 z-10" />
+                        <div className="absolute inset-0 bg-cyan-300/30 z-10 ring-2 ring-cyan-100/50 ring-inset" />
                       )}
                       {isDragTarget && (
-                        <div className="absolute inset-0 bg-foreground/20 z-10" />
+                        <div className="absolute inset-0 bg-emerald-300/30 z-10 ring-2 ring-emerald-100/50 ring-inset" />
                       )}
 
                       {/* Coords */}
@@ -1049,9 +1057,9 @@ const Puzzles = () => {
                       {isValidTarget && !isDragTarget && (
                         <div className="absolute z-30 flex items-center justify-center w-full h-full pointer-events-none">
                           {piece && !isDragSource ? (
-                            <div className="w-[82%] h-[82%] rounded-full border-[5px] border-foreground/20" />
+                            <div className="w-[82%] h-[82%] rounded-full border-[5px] border-cyan-100/45" />
                           ) : (
-                            <div className="w-[30%] h-[30%] rounded-full bg-foreground/20" />
+                            <div className="w-[30%] h-[30%] rounded-full bg-cyan-100/45" />
                           )}
                         </div>
                       )}
