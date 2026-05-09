@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      pvp_matches: {
+        Row: {
+          black_delta: number
+          black_rating_after: number
+          black_rating_before: number
+          black_user_id: string
+          created_at: string
+          game_type: string
+          id: string
+          match_id: string
+          result: string
+          white_delta: number
+          white_rating_after: number
+          white_rating_before: number
+          white_user_id: string
+        }
+        Insert: {
+          black_delta: number
+          black_rating_after: number
+          black_rating_before: number
+          black_user_id: string
+          created_at?: string
+          game_type?: string
+          id?: string
+          match_id: string
+          result: string
+          white_delta: number
+          white_rating_after: number
+          white_rating_before: number
+          white_user_id: string
+        }
+        Update: {
+          black_delta?: number
+          black_rating_after?: number
+          black_rating_before?: number
+          black_user_id?: string
+          created_at?: string
+          game_type?: string
+          id?: string
+          match_id?: string
+          result?: string
+          white_delta?: number
+          white_rating_after?: number
+          white_rating_before?: number
+          white_user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -79,7 +127,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      apply_pvp_elo_result: {
+        Args: {
+          p_black_user_id: string
+          p_game_type: string
+          p_match_id: string
+          p_result: string
+          p_white_user_id: string
+        }
+        Returns: {
+          applied: boolean
+          reason: string
+          white_user_id: string
+          black_user_id: string
+          white_rating_before: number | null
+          black_rating_before: number | null
+          white_rating_after: number | null
+          black_rating_after: number | null
+          white_delta: number
+          black_delta: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
