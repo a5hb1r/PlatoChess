@@ -23,7 +23,7 @@ import {
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
 import { BoardThemeSelect } from "@/components/BoardThemeSelect";
 import { PIECE_URLS } from "@/lib/chess-constants";
-import { rateMoveLikeChessCom } from "@/lib/move-rating";
+import { probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
 import {
   type CoachId,
   coachOnMoveRating,
@@ -32,6 +32,8 @@ import {
 } from "@/lib/philosopher-coaches";
 import { reviewTone } from "@/lib/review-colors";
 import {
+  markAnalysisTransitionStart,
+  saveLatestFinishedGame,
   saveLatestGameReview,
   scoreForLabel,
   type ReviewedPly,
@@ -176,6 +178,16 @@ const Game = () => {
       ChessSounds.gameOver();
     }
   }, [game]);
+
+  useEffect(() => {
+    if (!gameOver || game.history().length === 0) return;
+    saveLatestFinishedGame({
+      createdAt: Date.now(),
+      pgn: game.pgn(),
+      result: gameOver,
+      engine: engineLabel,
+    });
+  }, [engineLabel, game, gameOver]);
 
   // Stockfish plays black (use ref for position so this callback stays stable across white moves)
   const makeEngineMove = useCallback(async () => {
@@ -458,6 +470,8 @@ const Game = () => {
           playedUci: `${mv.from}${mv.to}${mv.promotion ?? ""}`,
           fenBefore,
           fenAfter: replay.fen(),
+          evalBeforeCp: probeResultToCp(beforeProbe),
+          evalAfterCp: probeResultToCp(afterProbe),
         });
         beforeProbe = afterProbe;
         setReviewProgress(i + 1);
@@ -468,7 +482,7 @@ const Game = () => {
         acc[k] = (acc[k] || 0) + 1;
         return acc;
       }, {});
-      const top = ["Brilliant", "Great", "Best", "Excellent", "Good", "Inaccuracy", "Miss", "Mistake", "Blunder"]
+      const top = ["Brilliant", "Best", "Excellent", "Good", "Inaccuracy", "Mistake", "Blunder"]
         .filter((k) => summary[k])
         .map((k) => `${k}: ${summary[k]}`)
         .join("  |  ");
@@ -628,7 +642,10 @@ const Game = () => {
                 )}
                 {reviewReady && (
                   <button
-                    onClick={() => navigate("/analyze-game")}
+                    onClick={() => {
+                      markAnalysisTransitionStart();
+                      navigate("/analyze-game");
+                    }}
                     className="w-full py-2.5 border border-border rounded-md font-body text-xs font-semibold text-foreground hover:bg-secondary transition-colors"
                   >
                     Open Full Analysis
@@ -857,7 +874,8 @@ const Game = () => {
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         <button
                           onClick={async () => {
-                            if (!reviewReady && !reviewingGame) await analyzeFinishedGame();
+                            markAnalysisTransitionStart();
+                            if (!reviewReady && !reviewingGame) void analyzeFinishedGame();
                             navigate("/analyze-game");
                           }}
                           disabled={reviewingGame || !engineReady || !!engineError}
