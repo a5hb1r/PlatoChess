@@ -31,7 +31,7 @@ vi.mock("stripe", () => {
 type MockReq = {
   method: string;
   body: Record<string, unknown>;
-  headers: Record<string, string>;
+  headers: Record<string, string | string[]>;
 };
 
 type MockRes = {
@@ -177,5 +177,27 @@ describe("create-portal-session handler", () => {
       return_url: "https://app.example/settings",
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  it("ignores malformed repeated authorization headers instead of crashing", async () => {
+    listMock.mockResolvedValueOnce({ data: [{ id: "cus_repeat" }] });
+    createMock.mockResolvedValueOnce({ url: "https://billing.stripe.test/session-repeat" });
+
+    const { default: handler } = await import("../../api/create-portal-session");
+    const req: MockReq = {
+      method: "POST",
+      body: { email: "member@example.com", returnUrl: "https://app.example/settings" },
+      headers: {
+        origin: "https://app.example",
+        authorization: ["Bearer token_one", "Bearer token_two"],
+      },
+    };
+    const res = createRes();
+
+    await handler(req as never, res as never);
+
+    expect(listMock).toHaveBeenCalledWith({ email: "member@example.com", limit: 1 });
+    expect(res.statusCode).toBe(200);
+    expect(res.payload).toEqual({ url: "https://billing.stripe.test/session-repeat" });
   });
 });
