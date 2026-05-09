@@ -106,11 +106,11 @@ const Play = () => {
 
   const handlePlay = () => {
     toast.message("Online matchmaking is not live yet - opening a practice game vs Stockfish.");
-    navigate("/game?level=2");
+    navigate("/game?level=2&mode=online");
   };
 
   const handlePlayStockfish = (level: number) => {
-    navigate(`/game?level=${level}`);
+    navigate(`/game?level=${level}&mode=practice`);
   };
 
   return (
@@ -290,7 +290,7 @@ const Play = () => {
             {COACH_MATCHUPS.map((coach) => (
               <Link
                 key={coach.id}
-                to={`/game?level=${coach.level}&coach=${coach.id}`}
+                to={`/game?level=${coach.level}&coach=${coach.id}&mode=practice`}
                 className="rounded-lg border border-border bg-card p-4 hover:bg-secondary hover:border-foreground/25 transition-colors"
               >
                 <p className="font-display text-base font-semibold text-foreground">{coach.name}</p>

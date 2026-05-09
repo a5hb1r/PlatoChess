@@ -80,6 +80,8 @@ const Game = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const difficultyParam = parseInt(searchParams.get("level") || "2");
+  const modeParam = (searchParams.get("mode") || "practice").toLowerCase();
+  const isPracticeMode = modeParam !== "online";
   const difficulty = DIFFICULTY_LEVELS[Math.min(difficultyParam, DIFFICULTY_LEVELS.length - 1)];
   const coach = parseCoachId(searchParams.get("coach"));
   const [coachLine, setCoachLine] = useState<string | null>(null);
@@ -158,7 +160,7 @@ const Game = () => {
   // so Stockfish is not interrupted while searching the opponent's reply.
   const liveEvalNeeded = coach !== "none" || !!viewFen || !!gameOver;
   useEffect(() => {
-    if (!liveEvalNeeded) return;
+    if (!isPracticeMode || !liveEvalNeeded) return;
     if (!engineReady || !engineRef.current || engineError) return;
     const fen = viewFen || gameFen;
     const side = new Chess(fen).turn();
@@ -170,7 +172,7 @@ const Game = () => {
         setEval_(info.score);
       }
     });
-  }, [gameFen, viewFen, engineReady, engineError, liveEvalNeeded]);
+  }, [gameFen, viewFen, engineReady, engineError, isPracticeMode, liveEvalNeeded]);
 
   // Check game over
   useEffect(() => {
@@ -673,7 +675,7 @@ const Game = () => {
 
           {/* Center - Board + Eval bar */}
           <div className="lg:col-span-6 flex flex-col items-center order-1 lg:order-2">
-            <div className="flex w-full max-w-[600px] gap-2">
+            <div className={`flex w-full max-w-[600px] ${showEvalBar ? "gap-2" : ""}`}>
               {/* Eval bar - hidden while a game is actively in progress. */}
               {showEvalBar && (
                 <div
