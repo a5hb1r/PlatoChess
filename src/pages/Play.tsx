@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -12,9 +12,12 @@ import {
   Puzzle,
   LineChart,
   BookOpen,
+  CalendarClock,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 
 const variants = [
   {
@@ -45,6 +48,13 @@ const variants = [
     description: "Randomized back rank. No memorized openings - pure chess.",
     color: "text-foreground/75",
   },
+  {
+    id: "daily",
+    icon: CalendarClock,
+    name: "Daily Chess",
+    description: "24-hour move windows and turn reminders.",
+    color: "text-foreground/75",
+  },
 ];
 
 const timeControls: Record<string, { label: string; time: string }[]> = {
@@ -69,6 +79,7 @@ const timeControls: Record<string, { label: string; time: string }[]> = {
     { label: "Rapid 10|0", time: "10+0" },
     { label: "Increment 5|3", time: "5+3" },
   ],
+  daily: [{ label: "Daily 24h per move", time: "24h/move" }],
 };
 
 const containerVariants = {
@@ -99,12 +110,74 @@ const COACH_MATCHUPS = [
 ] as const;
 
 const Play = () => {
+  const { user } = useAuth();
   const [selectedVariant, setSelectedVariant] = useState<string | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
+  const [maxActiveGames, setMaxActiveGames] = useState(3);
+  const [activeGameCount, setActiveGameCount] = useState(0);
+  const [loadingActiveGameGate, setLoadingActiveGameGate] = useState(false);
   const navigate = useNavigate();
 
-  const handlePlay = () => {
+  const fetchActiveGameCount = async (userId: string) => {
+    const { data, error } = await supabase.rpc("get_active_game_count", {
+      p_user_id: userId,
+    });
+    if (error) return 0;
+    return typeof data === "number" ? data : 0;
+  };
+
+  useEffect(() => {
+    if (!user) {
+      setActiveGameCount(0);
+      setMaxActiveGames(3);
+      return;
+    }
+
+    let mounted = true;
+    setLoadingActiveGameGate(true);
+    Promise.all([
+      supabase
+        .from("profiles")
+        .select("max_active_games")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      fetchActiveGameCount(user.id),
+    ])
+      .then(([profileResponse, gameCount]) => {
+        if (!mounted) return;
+        if (profileResponse.data?.max_active_games) {
+          setMaxActiveGames(profileResponse.data.max_active_games);
+        }
+        setActiveGameCount(gameCount);
+      })
+      .finally(() => {
+        if (mounted) setLoadingActiveGameGate(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
+
+  const handlePlay = async () => {
+    if (user) {
+      setLoadingActiveGameGate(true);
+      const latestCount = await fetchActiveGameCount(user.id);
+      setActiveGameCount(latestCount);
+      setLoadingActiveGameGate(false);
+      if (latestCount >= maxActiveGames) {
+        toast.error(`Active game limit reached (${latestCount}/${maxActiveGames}). Finish a game before seeking another.`);
+        return;
+      }
+    }
+
+    if (selectedVariant === "daily") {
+      toast.success("Starting Daily mode (24h per move). Turn notifications are enabled.");
+      navigate("/game?level=2&mode=daily");
+      return;
+    }
+
     toast.message("Online matchmaking is not live yet - opening a practice game vs Stockfish.");
     navigate("/game?level=2");
   };
@@ -242,6 +315,13 @@ const Play = () => {
             <p className="font-body text-xs text-muted-foreground mt-3">
               {variants.find((v) => v.id === selectedVariant)?.name}  -  {selectedTime}
             </p>
+            {user && (
+              <p className="font-body text-xs text-muted-foreground mt-2">
+                {loadingActiveGameGate
+                  ? "Checking active game cap..."
+                  : `Active games: ${activeGameCount}/${maxActiveGames}`}
+              </p>
+            )}
           </motion.div>
         )}
 

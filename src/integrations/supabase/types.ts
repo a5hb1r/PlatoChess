@@ -21,6 +21,8 @@ export type Database = {
           display_name: string | null
           games_played: number
           id: string
+          max_active_games: number
+          premove_enabled: boolean
           puzzles_solved: number
           rating: number
           stripe_customer_id: string | null
@@ -40,6 +42,8 @@ export type Database = {
           display_name?: string | null
           games_played?: number
           id?: string
+          max_active_games?: number
+          premove_enabled?: boolean
           puzzles_solved?: number
           rating?: number
           stripe_customer_id?: string | null
@@ -59,6 +63,8 @@ export type Database = {
           display_name?: string | null
           games_played?: number
           id?: string
+          max_active_games?: number
+          premove_enabled?: boolean
           puzzles_solved?: number
           rating?: number
           stripe_customer_id?: string | null
@@ -74,15 +80,115 @@ export type Database = {
         }
         Relationships: []
       }
+      game_sessions: {
+        Row: {
+          black_user_id: string | null
+          created_at: string
+          daily_move_window_seconds: number
+          id: string
+          mode: Database["public"]["Enums"]["game_mode"]
+          move_deadline_at: string | null
+          next_turn_notified_at: string | null
+          status: Database["public"]["Enums"]["game_status"]
+          time_control: string | null
+          turn_color: string | null
+          updated_at: string
+          white_user_id: string | null
+        }
+        Insert: {
+          black_user_id?: string | null
+          created_at?: string
+          daily_move_window_seconds?: number
+          id?: string
+          mode?: Database["public"]["Enums"]["game_mode"]
+          move_deadline_at?: string | null
+          next_turn_notified_at?: string | null
+          status?: Database["public"]["Enums"]["game_status"]
+          time_control?: string | null
+          turn_color?: string | null
+          updated_at?: string
+          white_user_id?: string | null
+        }
+        Update: {
+          black_user_id?: string | null
+          created_at?: string
+          daily_move_window_seconds?: number
+          id?: string
+          mode?: Database["public"]["Enums"]["game_mode"]
+          move_deadline_at?: string | null
+          next_turn_notified_at?: string | null
+          status?: Database["public"]["Enums"]["game_status"]
+          time_control?: string | null
+          turn_color?: string | null
+          updated_at?: string
+          white_user_id?: string | null
+        }
+        Relationships: []
+      }
+      daily_turn_notifications: {
+        Row: {
+          channel: Database["public"]["Enums"]["game_notification_channel"]
+          created_at: string
+          delivered_at: string | null
+          game_session_id: string
+          id: string
+          payload: Json
+          recipient_user_id: string
+          status: Database["public"]["Enums"]["game_notification_status"]
+        }
+        Insert: {
+          channel?: Database["public"]["Enums"]["game_notification_channel"]
+          created_at?: string
+          delivered_at?: string | null
+          game_session_id: string
+          id?: string
+          payload?: Json
+          recipient_user_id: string
+          status?: Database["public"]["Enums"]["game_notification_status"]
+        }
+        Update: {
+          channel?: Database["public"]["Enums"]["game_notification_channel"]
+          created_at?: string
+          delivered_at?: string | null
+          game_session_id?: string
+          id?: string
+          payload?: Json
+          recipient_user_id?: string
+          status?: Database["public"]["Enums"]["game_notification_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_turn_notifications_game_session_id_fkey"
+            columns: ["game_session_id"]
+            isOneToOne: false
+            referencedRelation: "game_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      can_start_new_seek: {
+        Args: {
+          p_user_id: string
+        }
+        Returns: boolean
+      }
+      get_active_game_count: {
+        Args: {
+          p_user_id: string
+        }
+        Returns: number
+      }
     }
     Enums: {
-      [_ in never]: never
+      game_mode: "standard" | "blitz" | "increment" | "chess960" | "daily"
+      game_notification_channel: "email" | "in_app"
+      game_notification_status: "pending" | "delivered" | "failed"
+      game_status: "pending" | "active" | "completed" | "abandoned"
     }
     CompositeTypes: {
       [_ in never]: never
