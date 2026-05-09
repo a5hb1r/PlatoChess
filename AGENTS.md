@@ -46,6 +46,9 @@ Run from repo root:
 - For non-trivial UI changes, record a short demo video showing the behavior working.
 - Include concise evidence in summaries (exact commands run + pass/fail result).
 - If local environment issues block validation, document attempted remediations and remaining blocker clearly.
+- `vitest.config.ts` imports `@vitejs/plugin-react-swc` which is not listed in `package.json`. The update script handles installing it, but be aware of this mismatch if debugging test startup failures.
+- The dev server listens on port 8080 (`vite.config.ts`). Playwright E2E tests auto-start it via `webServer` config, so `npm run test:e2e` works without a running server.
+- Supabase credentials are pre-configured in `.env`. Stripe/Sentry keys are optional; the app runs without them.
 
 ## PR / Change Hygiene
 
