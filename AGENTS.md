@@ -52,6 +52,7 @@ Run from repo root:
 - No local databases or Docker services are needed. Supabase is cloud-hosted; credentials are in `.env`.
 - Playwright E2E tests have `reuseExistingServer: true`, so start `npm run dev` before running `npm run test:e2e` to avoid waiting for a fresh server spawn.
 - Playwright E2E tests require Chromium (`npx playwright install --with-deps chromium`) before the first run.
+- Stripe and Sentry keys are optional; the app can run without them for local testing.
 
 ## PR / Change Hygiene
 
