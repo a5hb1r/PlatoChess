@@ -280,10 +280,9 @@ const Game = () => {
     return () => engine.destroy();
   }, [difficulty.skill]);
 
-  // Live eval is only consumed by post-game review (eval bar is hidden during play)
-  // and the philosopher coach. Skip the engine call entirely when neither needs it
-  // so Stockfish is not interrupted while searching the opponent's reply.
-  const liveEvalNeeded = coach !== "none" || !!viewFen || !!gameOver;
+  // Keep eval updates active in practice mode (visible eval bar), and also when
+  // coach/review requires it in other modes.
+  const liveEvalNeeded = isPracticeMode || coach !== "none" || !!viewFen || !!gameOver;
   useEffect(() => {
     if (!isPracticeMode || !liveEvalNeeded) return;
     if (!engineReady || !engineRef.current || engineError) return;
@@ -805,10 +804,8 @@ const Game = () => {
     };
   }, [gameOver, handleAnalyzeAction, handleNewOpponentAction, resetGame]);
 
-  // Eval bar is intentionally hidden while a game is actively being played.
-  // It only re-appears once the game has finished so post-game review still
-  // surfaces a final evaluation.
-  const showEvalBar = !!gameOver;
+  // Practice mode keeps the eval bar visible; online/daily modes hide it.
+  const showEvalBar = isPracticeMode;
 
   return (
     <div className="min-h-screen bg-background">

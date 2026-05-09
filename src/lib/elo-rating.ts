@@ -49,5 +49,5 @@ export function calculatePvpEloChange({
     score: whiteScore,
     kFactor,
   });
-  return { whiteDelta, blackDelta: -whiteDelta };
+  return { whiteDelta, blackDelta: whiteDelta === 0 ? 0 : -whiteDelta };
 }
