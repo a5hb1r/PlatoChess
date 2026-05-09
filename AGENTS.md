@@ -46,6 +46,8 @@ Run from repo root:
 - For non-trivial UI changes, record a short demo video showing the behavior working.
 - Include concise evidence in summaries (exact commands run + pass/fail result).
 - If local environment issues block validation, document attempted remediations and remaining blocker clearly.
+- The `postinstall` script copies Stockfish WASM binaries from `node_modules/stockfish/bin/` into `public/stockfish/`.
+- Playwright E2E tests require Chromium (`npx playwright install --with-deps chromium`) before the first run.
 
 ## PR / Change Hygiene
 

@@ -23,4 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 
-public/stockfish/stockfish-18-single.wasm
+public/stockfish/*.wasm
+
+# Playwright
+test-results/
