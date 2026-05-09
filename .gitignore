@@ -25,5 +25,6 @@ dist-ssr
 
 public/stockfish/*.wasm
 
-# Playwright
+# Playwright artefacts
 test-results/
+playwright-report

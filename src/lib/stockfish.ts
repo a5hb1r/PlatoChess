@@ -7,8 +7,6 @@ export interface StockfishInfo {
   depth?: number;
   score?: number;
   mate?: number;
-  bestMove?: string;
-  pv?: string;
   pvLine?: string;
 }
 
@@ -36,13 +34,13 @@ export function formatEngineInitError(e: unknown): string {
   return "Unknown error";
 }
 
+/** Most builds emit string payloads; older shims wrap them as `{ data }`. */
 function parseWorkerPayload(data: unknown): string[] {
-  if (data == null) return [];
   if (typeof data === "string") return data.split(/\r?\n/).filter(Boolean);
-  if (typeof data === "object" && data !== null && "data" in data && typeof (data as { data: unknown }).data === "string") {
-    return parseWorkerPayload((data as { data: string }).data);
+  if (data && typeof data === "object" && "data" in data) {
+    return parseWorkerPayload((data as { data: unknown }).data);
   }
-  return [String(data)];
+  return data == null ? [] : [String(data)];
 }
 
 export class StockfishEngine {
@@ -127,26 +125,22 @@ export class StockfishEngine {
   }
 
   private handleLine(line: string) {
-    if (line.startsWith("info") && line.includes("score")) {
+    if (line.startsWith("info") && line.includes("score") && this.onInfo) {
       const info: StockfishInfo = {};
 
-      const depthMatch = line.match(/depth (\d+)/);
+      const depthMatch = line.match(/\bdepth (\d+)/);
       if (depthMatch) info.depth = parseInt(depthMatch[1], 10);
 
-      const cpMatch = line.match(/score cp (-?\d+)/);
+      const cpMatch = line.match(/\bscore cp (-?\d+)/);
       if (cpMatch) info.score = parseInt(cpMatch[1], 10);
 
-      const mateMatch = line.match(/score mate (-?\d+)/);
+      const mateMatch = line.match(/\bscore mate (-?\d+)/);
       if (mateMatch) info.mate = parseInt(mateMatch[1], 10);
 
       const pvMatch = line.match(/\bpv (.+)/);
-      if (pvMatch) {
-        const full = pvMatch[1].trim();
-        info.pvLine = full;
-        info.pv = full.split(/\s+/)[0];
-      }
+      if (pvMatch) info.pvLine = pvMatch[1].trim();
 
-      if (this.onInfo && (info.score !== undefined || info.mate !== undefined)) {
+      if (info.score !== undefined || info.mate !== undefined) {
         this.onInfo(info);
       }
     }

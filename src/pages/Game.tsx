@@ -21,6 +21,7 @@ import {
 } from "@/lib/stockfish";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
 import { BoardThemeSelect } from "@/components/BoardThemeSelect";
+import { OpeningPanel } from "@/components/OpeningPanel";
 import { PIECE_URLS } from "@/lib/chess-constants";
 import {
   type CoachId,
@@ -91,7 +92,6 @@ const Game = () => {
     { san: string; rating?: { label: string; color: string }; cpLoss?: number; bestUci?: string }[]
   >([]);
   const [eval_, setEval_] = useState<number>(0);
-  const [evalDepth, setEvalDepth] = useState(0);
   const [engineReady, setEngineReady] = useState(false);
   const [engineError, setEngineError] = useState<string | null>(null);
   const [engineLabel, setEngineLabel] = useState(STOCKFISH_VERSION_LABEL);
@@ -122,14 +122,16 @@ const Game = () => {
   const gameTurn = game.turn();
   const gameIsOver = game.isGameOver();
 
+  const sanHistory = useMemo(() => game.history(), [game]);
+
   const allLegalDestinations = useMemo(() => {
     const s = new Set<Square>();
-    if (game.turn() !== "w" || game.isGameOver() || viewFen) return s;
+    if (gameTurn !== "w" || gameIsOver || viewFen) return s;
     for (const m of game.moves({ verbose: true })) {
       if (m.color === "w") s.add(m.to as Square);
     }
     return s;
-  }, [game, viewFen]);
+  }, [game, gameTurn, gameIsOver, viewFen]);
 
   // Init Stockfish
   useEffect(() => {
@@ -151,8 +153,12 @@ const Game = () => {
     return () => engine.destroy();
   }, [difficulty.skill]);
 
-  // Run eval (skip while Stockfish is searching a move - avoids canceling / corrupting `getBestMove`)
+  // Live eval is only consumed by post-game review (eval bar is hidden during play)
+  // and the philosopher coach. Skip the engine call entirely when neither needs it
+  // so Stockfish is not interrupted while searching the opponent's reply.
+  const liveEvalNeeded = coach !== "none" || !!viewFen || !!gameOver;
   useEffect(() => {
+    if (!liveEvalNeeded) return;
     if (!engineReady || !engineRef.current || engineError) return;
     const fen = viewFen || gameFen;
     const side = new Chess(fen).turn();
@@ -163,9 +169,8 @@ const Game = () => {
       } else if (info.score !== undefined) {
         setEval_(info.score);
       }
-      if (info.depth) setEvalDepth(info.depth);
     });
-  }, [gameFen, viewFen, engineReady, engineError]);
+  }, [gameFen, viewFen, engineReady, engineError, liveEvalNeeded]);
 
   // Check game over
   useEffect(() => {
@@ -213,14 +218,14 @@ const Game = () => {
     if (
       engineReady &&
       !engineError &&
-      game.turn() === "b" &&
-      !game.isGameOver() &&
+      gameTurn === "b" &&
+      !gameIsOver &&
       !engineThinking
     ) {
       const timer = setTimeout(makeEngineMove, 320);
       return () => clearTimeout(timer);
     }
-  }, [game, gameTurn, gameIsOver, engineReady, engineError, engineThinking, makeEngineMove]);
+  }, [gameTurn, gameIsOver, engineReady, engineError, engineThinking, makeEngineMove]);
 
   useEffect(() => {
     if (coach === "none") return;
@@ -519,6 +524,11 @@ const Game = () => {
     };
   }, [gameOver, handleAnalyzeAction, handleNewOpponentAction, resetGame]);
 
+  // Eval bar is intentionally hidden while a game is actively being played.
+  // It only re-appears once the game has finished so post-game review still
+  // surfaces a final evaluation.
+  const showEvalBar = !!gameOver;
+
   return (
     <div className="min-h-screen bg-background">
       {/* Nav */}
@@ -608,6 +618,43 @@ const Game = () => {
 
             <BoardThemeSelect />
 
+            <OpeningPanel moves={sanHistory} />
+
+            {gameOver && (
+              <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+                <button
+                  onClick={analyzeFinishedGame}
+                  disabled={reviewingGame || !engineReady || !!engineError}
+                  className="w-full py-2.5 bg-primary rounded-md font-body text-xs font-semibold text-primary-foreground disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {reviewingGame ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Reviewing {reviewProgress}/{game.history().length}
+                    </>
+                  ) : (
+                    <>
+                      <BarChart3 className="w-3.5 h-3.5" />
+                      Analyze Completed Game
+                    </>
+                  )}
+                </button>
+                <p className="font-body text-[11px] text-muted-foreground">
+                  Move ratings stay hidden during play and appear only after this review, similar to Chess.com.
+                </p>
+                {reviewSummary && (
+                  <p className="font-body text-[11px] text-foreground/80 leading-relaxed">{reviewSummary}</p>
+                )}
+                {reviewReady && (
+                  <button
+                    onClick={() => navigate("/analyze-game")}
+                    className="w-full py-2.5 border border-border rounded-md font-body text-xs font-semibold text-foreground hover:bg-secondary transition-colors"
+                  >
+                    Open Full Analysis
+                  </button>
+                )}
+              </div>
+            )}
             {coach !== "none" && (
               <div className="rounded-lg border border-border bg-card p-4 space-y-2">
                 <p className="font-display text-xs font-semibold text-foreground uppercase tracking-wider">
@@ -627,24 +674,29 @@ const Game = () => {
           {/* Center - Board + Eval bar */}
           <div className="lg:col-span-6 flex flex-col items-center order-1 lg:order-2">
             <div className="flex w-full max-w-[600px] gap-2">
-              {/* Eval bar */}
-              <div className="w-6 rounded-lg overflow-hidden border border-border bg-muted flex flex-col-reverse relative">
-                <motion.div
-                  className="bg-ivory"
-                  animate={{ height: `${whitePercent}%` }}
-                  transition={{ duration: 0.4, ease: "easeOut" }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span
-                    className={`font-mono text-[9px] font-bold ${
-                      eval_ >= 0 ? "text-foreground" : "text-muted-foreground"
-                    }`}
-                    style={{ writingMode: "vertical-lr", transform: "rotate(180deg)" }}
-                  >
-                    {evalDisplay}
-                  </span>
+              {/* Eval bar - hidden while a game is actively in progress. */}
+              {showEvalBar && (
+                <div
+                  data-testid="eval-bar"
+                  className="w-6 rounded-lg overflow-hidden border border-border bg-muted flex flex-col-reverse relative"
+                >
+                  <motion.div
+                    className="bg-ivory"
+                    animate={{ height: `${whitePercent}%` }}
+                    transition={{ duration: 0.4, ease: "easeOut" }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span
+                      className={`font-mono text-[9px] font-bold ${
+                        eval_ >= 0 ? "text-foreground" : "text-muted-foreground"
+                      }`}
+                      style={{ writingMode: "vertical-lr", transform: "rotate(180deg)" }}
+                    >
+                      {evalDisplay}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Board */}
               <div className="flex-1 relative rounded-lg overflow-hidden border border-border shadow-elevated">
@@ -902,9 +954,11 @@ const Game = () => {
               </button>
             </div>
 
-            {/* Eval info */}
+            {/* Engine label only - centipawn / depth / PV are intentionally not
+                surfaced while a game is actively being played. */}
             <div className="mt-2 font-body text-xs text-muted-foreground text-center">
-              {engineLabel}  -  Eval: {evalDisplay}  -  Depth: {evalDepth}
+              {engineLabel}
+              {showEvalBar && ` - Eval: ${evalDisplay}`}
             </div>
             {engineError && (
               <p className="mt-2 max-w-md mx-auto text-center text-sm text-destructive font-body">
@@ -987,16 +1041,6 @@ const Game = () => {
                 )}
               </div>
 
-              {/* Live analysis indicator */}
-              <div className="mt-4 pt-4 border-t border-border flex justify-between items-center">
-                <div className="font-body text-xs text-muted-foreground flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-foreground/50 animate-pulse" />
-                  Live Analysis
-                </div>
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  d{evalDepth}
-                </span>
-              </div>
             </div>
           </div>
         </div>
