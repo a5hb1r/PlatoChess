@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 
 public/stockfish/stockfish-18-single.wasm
+
+# Playwright artefacts
+test-results
+playwright-report
