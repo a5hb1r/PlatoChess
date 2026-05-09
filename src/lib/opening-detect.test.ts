@@ -27,8 +27,15 @@ describe("detectOpening", () => {
     expect(result?.name).toMatch(/Morphy/i);
   });
 
-  it("recognizes the Queen's Gambit Accepted family", () => {
-    const result = detectOpening(["d4", "d5", "c4", "dxc4"]);
+  it("recognizes the Queen's Gambit Accepted once the full book line is played", () => {
+    const moves = ["d4", "d5", "c4", "dxc4", "Nf3", "Nf6", "e3", "e6"];
+    const result = detectOpening(moves);
     expect(result?.name).toMatch(/Queen's Gambit Accepted/i);
+  });
+
+  it("does NOT claim a specific opening from a single-ply prefix", () => {
+    expect(detectOpening(["d4"])).toBeNull();
+    expect(detectOpening(["d4", "Nf6"])).toBeNull();
+    expect(detectOpening(["e4", "e5"])).toBeNull();
   });
 });

@@ -8,32 +8,33 @@ export interface DetectedOpening {
 }
 
 /**
- * Best-prefix opening lookup. Iterates the curated `OPENING_LINES` book once
- * and returns the entry whose move list is the longest prefix of `playedSan`.
+ * Strict opening lookup. Returns the longest book line whose entire SAN move
+ * list has been played. Reporting a partial-prefix match is intentionally
+ * avoided, since e.g. claiming "Bogo-Indian" after just `1.d4` (or any other
+ * one-ply prefix that happens to be the shortest book line starting with `d4`)
+ * is misleading.
  *
- * Returns `null` for the empty start position or when no book line matches the
- * first played move.
+ * Returns `null` when no book line is fully matched yet, so the UI can fall
+ * back to a neutral "out of book" / "awaiting first move" message.
  */
 export function detectOpening(playedSan: readonly string[]): DetectedOpening | null {
   if (playedSan.length === 0) return null;
 
-  let best: { line: OpeningLine; matched: number } | null = null;
+  let best: OpeningLine | null = null;
 
-  for (const line of OPENING_LINES) {
-    const limit = Math.min(line.moves.length, playedSan.length);
-    let i = 0;
-    while (i < limit && line.moves[i] === playedSan[i]) i++;
-    if (i === 0) continue;
-    if (!best || i > best.matched || (i === best.matched && line.moves.length < best.line.moves.length)) {
-      best = { line, matched: i };
+  outer: for (const line of OPENING_LINES) {
+    if (line.moves.length > playedSan.length) continue;
+    for (let i = 0; i < line.moves.length; i++) {
+      if (line.moves[i] !== playedSan[i]) continue outer;
     }
+    if (!best || line.moves.length > best.moves.length) best = line;
   }
 
   if (!best) return null;
   return {
-    name: best.line.name,
-    eco: best.line.eco,
-    family: best.line.family,
-    matchedPlies: best.matched,
+    name: best.name,
+    eco: best.eco,
+    family: best.family,
+    matchedPlies: best.moves.length,
   };
 }
