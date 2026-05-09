@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
@@ -18,10 +18,11 @@ import {
   Sparkles,
   Gift,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Chess, Color, Square, PieceSymbol } from "chess.js";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
 import { PIECE_URLS } from "@/lib/chess-constants";
+import { loadPersonalizedPuzzles } from "@/lib/game-review";
 
 interface Puzzle {
   id: string;
@@ -33,6 +34,7 @@ interface Puzzle {
   playerColor: "w" | "b";
   solution: string[]; // Alternating player/opponent moves in UCI (e.g. "e7e8q")
   hint: string;
+  source?: "default" | "personalized";
 }
 
 const BASE_PUZZLES: Puzzle[] = [
@@ -540,8 +542,28 @@ function generatePuzzleBank(base: Puzzle[], target = 2400): Puzzle[] {
 
 const PUZZLES: Puzzle[] = generatePuzzleBank(BASE_PUZZLES, 2600);
 
+function mapPersonalizedPuzzles(): Puzzle[] {
+  return loadPersonalizedPuzzles().map((puzzle) => {
+    const difficulty: Puzzle["difficulty"] =
+      puzzle.bestGapCp >= 180 ? "hard" : puzzle.bestGapCp >= 110 ? "medium" : "easy";
+    return {
+      id: `personal-${puzzle.id}`,
+      title: puzzle.title,
+      description: puzzle.description,
+      category: "From My Games",
+      difficulty,
+      fen: puzzle.fen,
+      playerColor: puzzle.playerColor,
+      solution: puzzle.solution,
+      hint: "Find the unique top move from your own game.",
+      source: "personalized",
+    };
+  });
+}
+
 const CATEGORIES = [
   { id: "all", label: "All Puzzles", icon: Target },
+  { id: "From My Games", label: "From My Games", icon: Lightbulb },
   { id: "Fork", label: "Forks", icon: Zap },
   { id: "Pin", label: "Pins", icon: Shield },
   { id: "Skewer", label: "Skewers", icon: Swords },
@@ -577,6 +599,7 @@ function getSquareFromPoint(
 }
 
 const Puzzles = () => {
+  const [searchParams] = useSearchParams();
   const [category, setCategory] = useState("all");
   const [puzzleIndex, setPuzzleIndex] = useState(0);
   const [game, setGame] = useState<Chess | null>(null);
@@ -599,12 +622,26 @@ const Puzzles = () => {
   const [dragOver, setDragOver] = useState<Square | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
 
-  const filteredPuzzles = category === "all"
-    ? PUZZLES
-    : PUZZLES.filter((p) => p.category === category);
+  const allPuzzles = useMemo(() => {
+    const personalized = mapPersonalizedPuzzles();
+    return [...personalized, ...PUZZLES];
+  }, []);
 
-  const currentPuzzle = filteredPuzzles[puzzleIndex % filteredPuzzles.length];
+  const filteredPuzzles = category === "all"
+    ? allPuzzles
+    : allPuzzles.filter((p) => p.category === category);
+
+  const activePuzzles = filteredPuzzles.length > 0 ? filteredPuzzles : allPuzzles;
+  const currentPuzzle = activePuzzles[puzzleIndex % activePuzzles.length];
   const flipped = currentPuzzle?.playerColor === "b";
+
+  useEffect(() => {
+    if (searchParams.get("source") !== "personalized") return;
+    const hasPersonalized = allPuzzles.some((p) => p.category === "From My Games");
+    if (!hasPersonalized) return;
+    setCategory("From My Games");
+    setPuzzleIndex(0);
+  }, [allPuzzles, searchParams]);
 
   // Initialize puzzle
   useEffect(() => {
@@ -794,7 +831,7 @@ const Puzzles = () => {
   }, [dragging, validMoves, executePlayerMove, flipped]);
 
   const nextPuzzle = () => {
-    setPuzzleIndex((i) => (i + 1) % filteredPuzzles.length);
+    setPuzzleIndex((i) => (i + 1) % activePuzzles.length);
   };
 
   const retryPuzzle = () => {
@@ -841,7 +878,7 @@ const Puzzles = () => {
               </div>
             )}
             <span className="font-body text-xs text-muted-foreground border border-border rounded-full px-3 py-1">
-              {solved.size}/{PUZZLES.length} solved
+              {solved.size}/{allPuzzles.length} solved
             </span>
           </div>
         </div>
@@ -859,8 +896,8 @@ const Puzzles = () => {
                 {CATEGORIES.map((cat) => {
                   const count =
                     cat.id === "all"
-                      ? PUZZLES.length
-                      : PUZZLES.filter((p) => p.category === cat.id).length;
+                      ? allPuzzles.length
+                      : allPuzzles.filter((p) => p.category === cat.id).length;
                   return (
                     <button
                       key={cat.id}
@@ -1138,14 +1175,14 @@ const Puzzles = () => {
                 <div className="flex justify-between font-body text-sm">
                   <span className="text-muted-foreground">Solved</span>
                   <span className="font-semibold text-foreground">
-                    {solved.size}/{PUZZLES.length}
+                    {solved.size}/{allPuzzles.length}
                   </span>
                 </div>
                 <div className="w-full bg-secondary rounded-full h-2">
                   <div
                     className="bg-primary h-2 rounded-full transition-all duration-500"
                     style={{
-                      width: `${(solved.size / PUZZLES.length) * 100}%`,
+                      width: `${(solved.size / allPuzzles.length) * 100}%`,
                     }}
                   />
                 </div>
@@ -1165,12 +1202,12 @@ const Puzzles = () => {
                 Puzzles
               </h3>
               <div className="space-y-1">
-                {filteredPuzzles.map((p, i) => (
+                {activePuzzles.map((p, i) => (
                   <button
                     key={p.id}
                     onClick={() => setPuzzleIndex(i)}
                     className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm font-body transition-colors text-left ${
-                      puzzleIndex % filteredPuzzles.length === i
+                      puzzleIndex % activePuzzles.length === i
                         ? "bg-secondary text-foreground border border-border"
                         : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
                     }`}
