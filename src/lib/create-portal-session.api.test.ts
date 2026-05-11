@@ -1,19 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const authGetUserMock = vi.fn();
-const selectMock = vi.fn();
-const eqMock = vi.fn();
-const maybeSingleMock = vi.fn();
-const createClientMock = vi.fn();
-
-vi.mock("@supabase/supabase-js", () => {
-  return {
-    createClient: createClientMock,
-  };
-});
-
+const resolveAuthenticatedUserMock = vi.fn();
+const hasSupabaseAdminEnvMock = vi.fn();
+const getSupabaseAdminClientMock = vi.fn();
 const listMock = vi.fn();
 const createMock = vi.fn();
+
+vi.mock("../../api/_lib/resolve-auth-user", () => ({
+  resolveAuthenticatedUser: resolveAuthenticatedUserMock,
+}));
+
+vi.mock("../../api/_lib/supabase-admin", () => ({
+  hasSupabaseAdminEnv: hasSupabaseAdminEnvMock,
+  getSupabaseAdminClient: getSupabaseAdminClientMock,
+}));
 
 vi.mock("stripe", () => {
   return {
@@ -62,29 +62,34 @@ function createRes(): MockRes {
   };
 }
 
+function createSupabaseProfileLookup(stripeCustomerId: string | null) {
+  return {
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          maybeSingle: vi
+            .fn()
+            .mockResolvedValue({ data: { stripe_customer_id: stripeCustomerId }, error: null }),
+        })),
+      })),
+    })),
+  };
+}
+
 describe("create-portal-session handler", () => {
   beforeEach(() => {
     vi.resetModules();
-    authGetUserMock.mockReset();
-    selectMock.mockReset();
-    eqMock.mockReset();
-    maybeSingleMock.mockReset();
-    createClientMock.mockReset();
-
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "service_role_dummy";
-    process.env.SUPABASE_URL = "https://example.supabase.co";
-
-    maybeSingleMock.mockResolvedValue({ data: { stripe_customer_id: null }, error: null });
-    eqMock.mockReturnValue({ maybeSingle: maybeSingleMock });
-    selectMock.mockReturnValue({ eq: eqMock });
-    createClientMock.mockReturnValue({
-      from: vi.fn(() => ({ select: selectMock })),
-      auth: { getUser: authGetUserMock },
-    });
+    process.env.STRIPE_SECRET_KEY = "sk_test_dummy";
+    resolveAuthenticatedUserMock.mockReset();
+    hasSupabaseAdminEnvMock.mockReset();
+    getSupabaseAdminClientMock.mockReset();
+    listMock.mockReset();
+    createMock.mockReset();
+    resolveAuthenticatedUserMock.mockResolvedValue(null);
+    hasSupabaseAdminEnvMock.mockReturnValue(false);
   });
 
-  it("returns 400 when only email is provided and customer is missing", async () => {
-    process.env.STRIPE_SECRET_KEY = "sk_test_dummy";
+  it("returns 400 when no customer can be resolved", async () => {
     listMock.mockResolvedValueOnce({ data: [] });
 
     const { default: handler } = await import("../../api/create-portal-session");
@@ -103,7 +108,6 @@ describe("create-portal-session handler", () => {
   });
 
   it("creates portal session when email resolves to a customer", async () => {
-    process.env.STRIPE_SECRET_KEY = "sk_test_dummy";
     listMock.mockResolvedValueOnce({ data: [{ id: "cus_123" }] });
     createMock.mockResolvedValueOnce({ url: "https://billing.stripe.test/session" });
 
@@ -125,11 +129,10 @@ describe("create-portal-session handler", () => {
     expect(res.payload).toEqual({ url: "https://billing.stripe.test/session" });
   });
 
-  it("uses authenticated email from bearer token over body email", async () => {
-    process.env.STRIPE_SECRET_KEY = "sk_test_dummy";
-    authGetUserMock.mockResolvedValue({
-      data: { user: { id: "user_123", email: "real-member@example.com" } },
-      error: null,
+  it("uses authenticated email over body email", async () => {
+    resolveAuthenticatedUserMock.mockResolvedValueOnce({
+      id: "user_123",
+      email: "real-member@example.com",
     });
     listMock.mockResolvedValueOnce({ data: [{ id: "cus_456" }] });
     createMock.mockResolvedValueOnce({ url: "https://billing.stripe.test/session-2" });
@@ -138,19 +141,64 @@ describe("create-portal-session handler", () => {
     const req: MockReq = {
       method: "POST",
       body: { email: "spoofed@example.com", returnUrl: "https://app.example/settings" },
+      headers: { origin: "https://app.example" },
+    };
+    const res = createRes();
+
+    await handler(req as never, res as never);
+
+    expect(listMock).toHaveBeenCalledWith({ email: "real-member@example.com", limit: 1 });
+    expect(res.statusCode).toBe(200);
+    expect(res.payload).toEqual({ url: "https://billing.stripe.test/session-2" });
+  });
+
+  it("uses profile stripe customer id when available", async () => {
+    resolveAuthenticatedUserMock.mockResolvedValueOnce({
+      id: "user_profile",
+      email: "profile@example.com",
+    });
+    hasSupabaseAdminEnvMock.mockReturnValue(true);
+    getSupabaseAdminClientMock.mockReturnValue(createSupabaseProfileLookup("cus_profile"));
+    createMock.mockResolvedValueOnce({ url: "https://billing.stripe.test/session-profile" });
+
+    const { default: handler } = await import("../../api/create-portal-session");
+    const req: MockReq = {
+      method: "POST",
+      body: { returnUrl: "https://app.example/settings" },
+      headers: { origin: "https://app.example" },
+    };
+    const res = createRes();
+
+    await handler(req as never, res as never);
+
+    expect(listMock).not.toHaveBeenCalled();
+    expect(createMock).toHaveBeenCalledWith({
+      customer: "cus_profile",
+      return_url: "https://app.example/settings",
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("ignores malformed repeated authorization headers instead of crashing", async () => {
+    listMock.mockResolvedValueOnce({ data: [{ id: "cus_repeat" }] });
+    createMock.mockResolvedValueOnce({ url: "https://billing.stripe.test/session-repeat" });
+
+    const { default: handler } = await import("../../api/create-portal-session");
+    const req: MockReq = {
+      method: "POST",
+      body: { email: "member@example.com", returnUrl: "https://app.example/settings" },
       headers: {
         origin: "https://app.example",
-        authorization: "Bearer token_123",
+        authorization: ["Bearer token_one", "Bearer token_two"],
       },
     };
     const res = createRes();
 
     await handler(req as never, res as never);
 
-    expect(authGetUserMock).toHaveBeenCalledWith("token_123");
-    expect(listMock).toHaveBeenCalledWith({ email: "real-member@example.com", limit: 1 });
+    expect(listMock).toHaveBeenCalledWith({ email: "member@example.com", limit: 1 });
     expect(res.statusCode).toBe(200);
-    expect(res.payload).toEqual({ url: "https://billing.stripe.test/session-2" });
+    expect(res.payload).toEqual({ url: "https://billing.stripe.test/session-repeat" });
   });
 
   it("ignores malformed repeated authorization headers instead of crashing", async () => {
