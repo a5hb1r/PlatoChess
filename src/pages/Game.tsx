@@ -260,6 +260,82 @@ const Game = () => {
     return () => window.clearInterval(interval);
   }, [dailyMoveDeadlineMs, game, gameOver, isDailyMode]);
 
+  const clearQueuedPremove = useCallback(() => {
+    setQueuedPremove(null);
+    localStorage.removeItem(PREMOVE_QUEUE_STORAGE_KEY);
+  }, []);
+
+  const queuePremove = useCallback((move: QueuedPremove) => {
+    setQueuedPremove(move);
+    localStorage.setItem(PREMOVE_QUEUE_STORAGE_KEY, JSON.stringify(move));
+    toast.message("Premove queued.");
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    supabase
+      .from("profiles")
+      .select("premove_enabled")
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        const enabled = data?.premove_enabled ?? true;
+        setPremoveEnabled(enabled);
+        localStorage.setItem(PREMOVE_STORAGE_KEY, JSON.stringify(enabled));
+      });
+  }, [user]);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== PREMOVE_STORAGE_KEY) return;
+      setPremoveEnabled(event.newValue !== "false");
+    };
+    const handleDisabled = () => {
+      setPremoveEnabled(false);
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("plato:premove-disabled", handleDisabled);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("plato:premove-disabled", handleDisabled);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!premoveEnabled) {
+      clearQueuedPremove();
+      setSelectedSquare(null);
+      setValidMoves([]);
+    }
+  }, [clearQueuedPremove, premoveEnabled]);
+
+  useEffect(() => {
+    if (!isDailyMode || gameOver) {
+      setDailyMoveDeadlineMs(null);
+      return;
+    }
+    const nextDeadline = Date.now() + DAILY_MOVE_WINDOW_MS;
+    setDailyMoveDeadlineMs(nextDeadline);
+    setDailyClockMs(DAILY_MOVE_WINDOW_MS);
+  }, [gameTurn, gameOver, isDailyMode]);
+
+  useEffect(() => {
+    if (!isDailyMode || !dailyMoveDeadlineMs || gameOver) return;
+
+    const tick = () => {
+      const remaining = dailyMoveDeadlineMs - Date.now();
+      setDailyClockMs(Math.max(0, remaining));
+      if (remaining <= 0) {
+        setGameOver(game.turn() === "w" ? "White flagged on time." : "Black flagged on time.");
+      }
+    };
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [dailyMoveDeadlineMs, game, gameOver, isDailyMode]);
+
   // Init Stockfish
   useEffect(() => {
     const engine = new StockfishEngine();
