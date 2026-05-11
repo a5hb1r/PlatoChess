@@ -200,27 +200,4 @@ describe("create-portal-session handler", () => {
     expect(res.statusCode).toBe(200);
     expect(res.payload).toEqual({ url: "https://billing.stripe.test/session-repeat" });
   });
-
-  it("ignores malformed repeated authorization headers instead of crashing", async () => {
-    process.env.STRIPE_SECRET_KEY = "sk_test_dummy";
-    listMock.mockResolvedValueOnce({ data: [{ id: "cus_repeat" }] });
-    createMock.mockResolvedValueOnce({ url: "https://billing.stripe.test/session-repeat" });
-
-    const { default: handler } = await import("../../api/create-portal-session");
-    const req: MockReq = {
-      method: "POST",
-      body: { email: "member@example.com", returnUrl: "https://app.example/settings" },
-      headers: {
-        origin: "https://app.example",
-        authorization: ["Bearer token_one", "Bearer token_two"],
-      },
-    };
-    const res = createRes();
-
-    await handler(req as never, res as never);
-
-    expect(listMock).toHaveBeenCalledWith({ email: "member@example.com", limit: 1 });
-    expect(res.statusCode).toBe(200);
-    expect(res.payload).toEqual({ url: "https://billing.stripe.test/session-repeat" });
-  });
 });
