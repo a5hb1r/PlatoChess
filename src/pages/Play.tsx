@@ -82,12 +82,12 @@ const itemVariants = {
 };
 
 const STOCKFISH_LEVELS = [
-  { label: "Beginner", rating: "~400", level: 0 },
-  { label: "Easy", rating: "~800", level: 1 },
-  { label: "Medium", rating: "~1200", level: 2 },
-  { label: "Hard", rating: "~1600", level: 3 },
-  { label: "Expert", rating: "~2000", level: 4 },
-  { label: "Master", rating: "~2500", level: 5 },
+  { label: "Beginner", rating: "~250", level: 0 },
+  { label: "Easy", rating: "~500", level: 1 },
+  { label: "Medium", rating: "~850", level: 2 },
+  { label: "Hard", rating: "~1150", level: 3 },
+  { label: "Expert", rating: "~1500", level: 4 },
+  { label: "Master", rating: "~1850", level: 5 },
 ];
 
 const COACH_MATCHUPS = [

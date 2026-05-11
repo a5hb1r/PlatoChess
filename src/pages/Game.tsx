@@ -39,13 +39,15 @@ import {
 } from "@/lib/game-review";
 
 const DIFFICULTY_LEVELS = [
-  { label: "Beginner", skill: 1, depth: 4, rating: "~400" },
-  { label: "Easy", skill: 5, depth: 6, rating: "~800" },
-  { label: "Medium", skill: 10, depth: 10, rating: "~1200" },
-  { label: "Hard", skill: 15, depth: 14, rating: "~1600" },
-  { label: "Expert", skill: 18, depth: 16, rating: "~2000" },
-  { label: "Master", skill: 20, depth: 20, rating: "~2500" },
+  { label: "Beginner", skill: 0, depth: 2, rating: "~250" },
+  { label: "Easy", skill: 2, depth: 3, rating: "~500" },
+  { label: "Medium", skill: 4, depth: 5, rating: "~850" },
+  { label: "Hard", skill: 7, depth: 7, rating: "~1150" },
+  { label: "Expert", skill: 10, depth: 9, rating: "~1500" },
+  { label: "Master", skill: 14, depth: 12, rating: "~1850" },
 ];
+const ENGINE_MOVE_DELAY_MS = 180;
+const EVAL_UPDATE_INTERVAL_MS = 120;
 
 function parseCoachId(raw: string | null): CoachId {
   const r = (raw || "").toLowerCase();
@@ -110,6 +112,7 @@ const Game = () => {
   } | null>(null);
   const [dragOver, setDragOver] = useState<Square | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  const lastEvalUiUpdateRef = useRef(0);
 
   const engineRef = useRef<StockfishEngine | null>(null);
   const gameRef = useRef(game);
@@ -160,11 +163,15 @@ const Game = () => {
     const side = new Chess(fen).turn();
     if (!viewFen && side === "b") return;
     engineRef.current.evaluate(fen, 18, (info: StockfishInfo) => {
+      const now = performance.now();
+      const shouldRefreshUi = now - lastEvalUiUpdateRef.current >= EVAL_UPDATE_INTERVAL_MS;
+      if (!shouldRefreshUi) return;
       if (info.mate !== undefined) {
         setEval_(info.mate > 0 ? 9999 : -9999);
       } else if (info.score !== undefined) {
         setEval_(info.score);
       }
+      lastEvalUiUpdateRef.current = now;
     });
   }, [gameFen, viewFen, engineReady, engineError, liveEvalNeeded]);
 
@@ -218,7 +225,7 @@ const Game = () => {
       !gameIsOver &&
       !engineThinking
     ) {
-      const timer = setTimeout(makeEngineMove, 320);
+      const timer = setTimeout(makeEngineMove, ENGINE_MOVE_DELAY_MS);
       return () => clearTimeout(timer);
     }
   }, [gameTurn, gameIsOver, engineReady, engineError, engineThinking, makeEngineMove]);
@@ -734,24 +741,24 @@ const Game = () => {
                         {isLastMoveSquare && !viewFen && (
                           <div
                             className={`absolute inset-0 ${
-                              isDark ? "bg-foreground/18" : "bg-foreground/12"
+                              isDark ? "bg-amber-200/30" : "bg-amber-300/35"
                             }`}
                           />
                         )}
 
                         {/* Selected highlight */}
                         {isSelected && (
-                          <div className="absolute inset-0 bg-foreground/25 z-10" />
+                          <div className="absolute inset-0 bg-cyan-300/30 z-10 ring-2 ring-cyan-100/50 ring-inset" />
                         )}
 
                         {/* Drag target highlight */}
                         {isDragTarget && (
-                          <div className="absolute inset-0 bg-foreground/20 z-10" />
+                          <div className="absolute inset-0 bg-emerald-300/30 z-10 ring-2 ring-emerald-100/50 ring-inset" />
                         )}
 
                         {showAmbienceDots && (
                           <div className="absolute z-[15] flex items-center justify-center w-full h-full pointer-events-none">
-                            <div className="w-[14%] h-[14%] rounded-full bg-foreground/12 ring-1 ring-foreground/10" />
+                            <div className="w-[14%] h-[14%] rounded-full bg-cyan-200/30 ring-1 ring-cyan-100/20" />
                           </div>
                         )}
 
@@ -791,9 +798,9 @@ const Game = () => {
                         {isValidTarget && !isDragTarget && (
                           <div className="absolute z-30 flex items-center justify-center w-full h-full pointer-events-none">
                             {piece && !isDragSource ? (
-                              <div className="w-[82%] h-[82%] rounded-full border-[5px] border-foreground/20" />
+                              <div className="w-[82%] h-[82%] rounded-full border-[5px] border-cyan-100/45" />
                             ) : (
-                              <div className="w-[30%] h-[30%] rounded-full bg-foreground/20" />
+                              <div className="w-[30%] h-[30%] rounded-full bg-cyan-100/45" />
                             )}
                           </div>
                         )}
