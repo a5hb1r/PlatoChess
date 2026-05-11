@@ -11,9 +11,23 @@ const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [username, setUsername] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [magicLoading, setMagicLoading] = useState(false);
   const navigate = useNavigate();
+
+  const normalizeUsername = (value: string) => value.trim().replace(/[^a-zA-Z0-9_]/g, "");
+
+  const validateUsername = (value: string) => {
+    if (value.length < 3 || value.length > 30) {
+      return "Username must be 3-30 characters";
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(value)) {
+      return "Username can only contain letters, numbers, and underscores";
+    }
+    return null;
+  };
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,11 +40,21 @@ const Auth = () => {
         toast.success("Welcome back!");
         navigate("/play");
       } else {
+        const normalizedUsername = normalizeUsername(username);
+        const usernameError = validateUsername(normalizedUsername);
+        if (usernameError) {
+          toast.error(usernameError);
+          return;
+        }
+
         const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            data: { full_name: displayName },
+            data: {
+              full_name: displayName.trim(),
+              username: normalizedUsername,
+            },
             emailRedirectTo: window.location.origin,
           },
         });
@@ -45,7 +69,7 @@ const Auth = () => {
     }
   };
 
-  const handleOAuth = async (provider: "google" | "apple") => {
+  const handleOAuth = async (provider: "google" | "azure") => {
     setLoading(true);
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
@@ -62,6 +86,49 @@ const Auth = () => {
       const message = error instanceof Error ? error.message : "Sign-in failed";
       toast.error(message);
       setLoading(false);
+    }
+  };
+
+  const handleEmailMagicLink = async () => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      toast.error("Enter your email first.");
+      return;
+    }
+
+    setMagicLoading(true);
+    try {
+      const signupMetadata = !isLogin
+        ? {
+            full_name: displayName.trim(),
+            username: normalizeUsername(username),
+          }
+        : undefined;
+
+      if (!isLogin) {
+        const usernameError = validateUsername(signupMetadata?.username ?? "");
+        if (usernameError) {
+          toast.error(usernameError);
+          return;
+        }
+      }
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email: normalizedEmail,
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: `${window.location.origin}/play`,
+          data: signupMetadata,
+        },
+      });
+      if (error) throw error;
+
+      toast.success("Magic link sent. Check your inbox.");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Could not send magic link";
+      toast.error(message);
+    } finally {
+      setMagicLoading(false);
     }
   };
 
@@ -113,14 +180,17 @@ const Auth = () => {
               Continue with Google
             </button>
             <button
-              onClick={() => handleOAuth("apple")}
+              onClick={() => handleOAuth("azure")}
               disabled={loading}
               className="w-full flex items-center justify-center gap-3 rounded-md border border-border bg-background px-4 py-3 font-body text-sm font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
             >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
+              <svg className="h-5 w-5" viewBox="0 0 24 24">
+                <path fill="#f25022" d="M2 2h9.5v9.5H2z" />
+                <path fill="#00a4ef" d="M12.5 2H22v9.5h-9.5z" />
+                <path fill="#7fba00" d="M2 12.5h9.5V22H2z" />
+                <path fill="#ffb900" d="M12.5 12.5H22V22h-9.5z" />
               </svg>
-              Continue with Apple
+              Continue with Outlook
             </button>
           </div>
 
@@ -139,16 +209,31 @@ const Auth = () => {
           {/* Email form */}
           <form onSubmit={handleEmailAuth} className="space-y-4">
             {!isLogin && (
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Display name"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background pl-10 pr-4 py-3 font-body text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground/35 focus:outline-none focus:ring-1 focus:ring-foreground/25"
-                  required
-                />
+              <div className="space-y-4">
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    placeholder="Display name"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    className="w-full rounded-md border border-border bg-background pl-10 pr-4 py-3 font-body text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground/35 focus:outline-none focus:ring-1 focus:ring-foreground/25"
+                    required
+                  />
+                </div>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-body text-sm text-muted-foreground">@</span>
+                  <input
+                    type="text"
+                    placeholder="Username (unique handle)"
+                    value={username}
+                    onChange={(e) => setUsername(normalizeUsername(e.target.value))}
+                    className="w-full rounded-md border border-border bg-background pl-8 pr-4 py-3 font-body text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground/35 focus:outline-none focus:ring-1 focus:ring-foreground/25"
+                    minLength={3}
+                    maxLength={30}
+                    required
+                  />
+                </div>
               </div>
             )}
             <div className="relative">
@@ -188,6 +273,14 @@ const Auth = () => {
               className="w-full bg-primary py-3 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100"
             >
               {loading ? "Loading..." : isLogin ? "Sign In" : "Create Account"}
+            </button>
+            <button
+              type="button"
+              onClick={handleEmailMagicLink}
+              disabled={magicLoading}
+              className="w-full border border-border py-3 rounded-md font-body text-sm font-semibold text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
+            >
+              {magicLoading ? "Sending..." : "Send Magic Link (SMTP Email)"}
             </button>
           </form>
 
