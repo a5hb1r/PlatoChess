@@ -9,8 +9,8 @@ import {
   Trophy,
   User,
   Bot,
-  Loader2,
   BarChart3,
+  Loader2,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Chess, Square, PieceSymbol } from "chess.js";
@@ -24,19 +24,23 @@ import { ChessSounds, playMoveSound } from "@/lib/sounds";
 import { BoardThemeSelect } from "@/components/BoardThemeSelect";
 import { OpeningPanel } from "@/components/OpeningPanel";
 import { PIECE_URLS } from "@/lib/chess-constants";
-import { rateMoveLikeChessCom } from "@/lib/move-rating";
+import { probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
 import {
   type CoachId,
-  coachOnMoveRating,
   coachOnEval,
   COACHES,
 } from "@/lib/philosopher-coaches";
 import { reviewTone } from "@/lib/review-colors";
 import {
+  markAnalysisTransitionStart,
+  saveLatestFinishedGame,
   saveLatestGameReview,
   scoreForLabel,
   type ReviewedPly,
 } from "@/lib/game-review";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 const DIFFICULTY_LEVELS = [
   { label: "Beginner", skill: 0, depth: 2, rating: "~250" },
@@ -49,11 +53,32 @@ const DIFFICULTY_LEVELS = [
 const ENGINE_MOVE_DELAY_MS = 180;
 const EVAL_UPDATE_INTERVAL_MS = 120;
 
+const DAILY_MOVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const PREMOVE_STORAGE_KEY = "plato:premove-enabled";
+const PREMOVE_QUEUE_STORAGE_KEY = "plato:queued-premove";
+type QueuedPremove = {
+  from: Square;
+  to: Square;
+  promotion?: string;
+};
+
 function parseCoachId(raw: string | null): CoachId {
   const r = (raw || "").toLowerCase();
   if (!r || r === "none") return "none";
   if (r in COACHES) return r as CoachId;
   return "none";
+}
+
+function parseGameMode(raw: string | null): "standard" | "daily" {
+  return raw === "daily" ? "daily" : "standard";
+}
+
+function formatDuration(ms: number): string {
+  const clamped = Math.max(0, ms);
+  const hours = Math.floor(clamped / (60 * 60 * 1000));
+  const minutes = Math.floor((clamped % (60 * 60 * 1000)) / (60 * 1000));
+  const seconds = Math.floor((clamped % (60 * 1000)) / 1000);
+  return `${hours}h ${minutes}m ${seconds}s`;
 }
 
 // Helper to get square from mouse/touch position relative to board
@@ -71,12 +96,32 @@ function getSquareFromPoint(
   return `${String.fromCharCode(97 + col)}${8 - row}` as Square;
 }
 
+function summarizeResultLabel(result: string): string {
+  const normalized = result.toLowerCase();
+  if (normalized.includes("checkmate")) return "Checkmate";
+  if (normalized.includes("stalemate")) return "Stalemate";
+  if (normalized.includes("draw")) return "Draw";
+  return "Game over";
+}
+
+function eloPulseForResult(result: string, skillLevel: number): number {
+  const baseSwing = Math.max(8, Math.round(8 + skillLevel * 0.65));
+  if (result.startsWith("White wins")) return baseSwing;
+  if (result.startsWith("Black wins")) return -Math.max(6, Math.round(baseSwing * 0.8));
+  return 0;
+}
+
 const Game = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const difficultyParam = parseInt(searchParams.get("level") || "2");
+  const modeParam = (searchParams.get("mode") || "practice").toLowerCase();
+  const isPracticeMode = modeParam !== "online";
   const difficulty = DIFFICULTY_LEVELS[Math.min(difficultyParam, DIFFICULTY_LEVELS.length - 1)];
   const coach = parseCoachId(searchParams.get("coach"));
+  const mode = parseGameMode(searchParams.get("mode"));
+  const isDailyMode = mode === "daily";
   const [coachLine, setCoachLine] = useState<string | null>(null);
 
   const [game, setGame] = useState(new Chess());
@@ -102,6 +147,12 @@ const Game = () => {
     from: Square;
     to: Square;
   } | null>(null);
+  const [premoveEnabled, setPremoveEnabled] = useState(true);
+  const [queuedPremove, setQueuedPremove] = useState<QueuedPremove | null>(null);
+  const [dailyMoveDeadlineMs, setDailyMoveDeadlineMs] = useState<number | null>(
+    isDailyMode ? Date.now() + DAILY_MOVE_WINDOW_MS : null
+  );
+  const [dailyClockMs, setDailyClockMs] = useState<number>(DAILY_MOVE_WINDOW_MS);
 
   // Drag state
   const [dragging, setDragging] = useState<{
@@ -112,6 +163,7 @@ const Game = () => {
   } | null>(null);
   const [dragOver, setDragOver] = useState<Square | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  const gameOverActionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const lastEvalUiUpdateRef = useRef(0);
 
   const engineRef = useRef<StockfishEngine | null>(null);
@@ -131,6 +183,82 @@ const Game = () => {
     }
     return s;
   }, [game, gameTurn, gameIsOver, viewFen]);
+
+  const clearQueuedPremove = useCallback(() => {
+    setQueuedPremove(null);
+    localStorage.removeItem(PREMOVE_QUEUE_STORAGE_KEY);
+  }, []);
+
+  const queuePremove = useCallback((move: QueuedPremove) => {
+    setQueuedPremove(move);
+    localStorage.setItem(PREMOVE_QUEUE_STORAGE_KEY, JSON.stringify(move));
+    toast.message("Premove queued.");
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    supabase
+      .from("profiles")
+      .select("premove_enabled")
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        const enabled = data?.premove_enabled ?? true;
+        setPremoveEnabled(enabled);
+        localStorage.setItem(PREMOVE_STORAGE_KEY, JSON.stringify(enabled));
+      });
+  }, [user]);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== PREMOVE_STORAGE_KEY) return;
+      setPremoveEnabled(event.newValue !== "false");
+    };
+    const handleDisabled = () => {
+      setPremoveEnabled(false);
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("plato:premove-disabled", handleDisabled);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("plato:premove-disabled", handleDisabled);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!premoveEnabled) {
+      clearQueuedPremove();
+      setSelectedSquare(null);
+      setValidMoves([]);
+    }
+  }, [clearQueuedPremove, premoveEnabled]);
+
+  useEffect(() => {
+    if (!isDailyMode || gameOver) {
+      setDailyMoveDeadlineMs(null);
+      return;
+    }
+    const nextDeadline = Date.now() + DAILY_MOVE_WINDOW_MS;
+    setDailyMoveDeadlineMs(nextDeadline);
+    setDailyClockMs(DAILY_MOVE_WINDOW_MS);
+  }, [gameTurn, gameOver, isDailyMode]);
+
+  useEffect(() => {
+    if (!isDailyMode || !dailyMoveDeadlineMs || gameOver) return;
+
+    const tick = () => {
+      const remaining = dailyMoveDeadlineMs - Date.now();
+      setDailyClockMs(Math.max(0, remaining));
+      if (remaining <= 0) {
+        setGameOver(game.turn() === "w" ? "White flagged on time." : "Black flagged on time.");
+      }
+    };
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [dailyMoveDeadlineMs, game, gameOver, isDailyMode]);
 
   // Init Stockfish
   useEffect(() => {
@@ -152,9 +280,11 @@ const Game = () => {
     return () => engine.destroy();
   }, [difficulty.skill]);
 
-  // Live eval is only consumed by post-game review (eval bar is hidden during play)
-  // and the philosopher coach. Skip the engine call entirely when neither needs it
-  // so Stockfish is not interrupted while searching the opponent's reply.
+  // Live eval is only consumed by the philosopher coach, history scrubbing,
+  // and post-game review. The eval bar itself is hidden during active play,
+  // so we skip the engine call when nothing needs it - avoids interrupting
+  // Stockfish while it searches the opponent's reply. Daily mode never
+  // surfaces eval, so this also keeps daily quiet by construction.
   const liveEvalNeeded = coach !== "none" || !!viewFen || !!gameOver;
   useEffect(() => {
     if (!liveEvalNeeded) return;
@@ -188,6 +318,16 @@ const Game = () => {
       ChessSounds.gameOver();
     }
   }, [game]);
+
+  useEffect(() => {
+    if (!gameOver || game.history().length === 0) return;
+    saveLatestFinishedGame({
+      createdAt: Date.now(),
+      pgn: game.pgn(),
+      result: gameOver,
+      engine: engineLabel,
+    });
+  }, [engineLabel, game, gameOver]);
 
   // Stockfish plays black (use ref for position so this callback stays stable across white moves)
   const makeEngineMove = useCallback(async () => {
@@ -236,10 +376,9 @@ const Game = () => {
       setCoachLine("I am ready. Play with intention, and I will annotate the ideas behind each move.");
       return;
     }
-    if (reviewingGame) return;
     const last = moveHistory[moveHistory.length - 1];
     setCoachLine(coachOnEval(coach, eval_, null, last?.san ?? null, moveHistory.length * 13));
-  }, [coach, moveHistory, eval_, reviewingGame]);
+  }, [coach, moveHistory, eval_]);
 
   const executeMove = useCallback((from: Square, to: Square, promotion?: string) => {
     const g = new Chess(game.fen());
@@ -266,11 +405,64 @@ const Game = () => {
     return false;
   }, [coach, eval_, game]);
 
+  useEffect(() => {
+    if (!queuedPremove || game.turn() !== "w" || engineThinking || gameOver || !premoveEnabled) return;
+
+    const queuedMove = queuedPremove;
+    clearQueuedPremove();
+    const played = executeMove(queuedMove.from, queuedMove.to, queuedMove.promotion);
+    if (played) {
+      toast.success("Queued premove played.");
+    } else {
+      toast.message("Queued premove cleared because it was no longer legal.");
+    }
+  }, [
+    clearQueuedPremove,
+    engineThinking,
+    executeMove,
+    game,
+    gameOver,
+    premoveEnabled,
+    queuedPremove,
+  ]);
+
+  useEffect(() => {
+    if (!isDailyMode || gameOver) return;
+    if (game.turn() === "w") {
+      toast.message("Daily mode: your move window has started.");
+    }
+  }, [gameTurn, gameOver, isDailyMode, game]);
+
   const handleSquareClick = (square: Square) => {
-    if (game.turn() !== "w" || engineThinking || gameOver || viewFen) return;
+    if (gameOver || viewFen) return;
     if (dragging) return; // Don't process clicks during drag
 
     const piece = game.get(square);
+
+    if (game.turn() !== "w") {
+      if (!premoveEnabled) return;
+
+      if (selectedSquare) {
+        if (selectedSquare === square) {
+          setSelectedSquare(null);
+          return;
+        }
+        queuePremove({ from: selectedSquare, to: square });
+        setSelectedSquare(null);
+        setValidMoves([]);
+        return;
+      }
+
+      if (piece && piece.color === "w") {
+        setSelectedSquare(square);
+      } else {
+        setSelectedSquare(null);
+      }
+      setValidMoves([]);
+      return;
+    }
+
+    if (engineThinking) return;
 
     if (selectedSquare) {
       const isValid = validMoves.includes(square);
@@ -380,7 +572,7 @@ const Game = () => {
     };
   }, [dragging, executeMove, game, validMoves]);
 
-  const resetGame = () => {
+  const resetGame = useCallback(() => {
     setGame(new Chess());
     setSelectedSquare(null);
     setValidMoves([]);
@@ -395,7 +587,12 @@ const Game = () => {
     setCoachLine(null);
     setReviewSummary(null);
     setReviewReady(false);
-  };
+    clearQueuedPremove();
+    if (isDailyMode) {
+      setDailyMoveDeadlineMs(Date.now() + DAILY_MOVE_WINDOW_MS);
+      setDailyClockMs(DAILY_MOVE_WINDOW_MS);
+    }
+  }, [clearQueuedPremove, isDailyMode]);
 
   const goToMove = (index: number) => {
     const fullHistory = game.history();
@@ -470,6 +667,8 @@ const Game = () => {
           playedUci: `${mv.from}${mv.to}${mv.promotion ?? ""}`,
           fenBefore,
           fenAfter: replay.fen(),
+          evalBeforeCp: probeResultToCp(beforeProbe),
+          evalAfterCp: probeResultToCp(afterProbe),
         });
         beforeProbe = afterProbe;
         setReviewProgress(i + 1);
@@ -480,7 +679,7 @@ const Game = () => {
         acc[k] = (acc[k] || 0) + 1;
         return acc;
       }, {});
-      const top = ["Brilliant", "Great", "Best", "Excellent", "Good", "Inaccuracy", "Miss", "Mistake", "Blunder"]
+      const top = ["Brilliant", "Best", "Excellent", "Good", "Inaccuracy", "Mistake", "Blunder"]
         .filter((k) => summary[k])
         .map((k) => `${k}: ${summary[k]}`)
         .join("  |  ");
@@ -503,13 +702,10 @@ const Game = () => {
         },
         moves: reviewedPlies,
       });
-      if (coach !== "none") {
-        setCoachLine(coachOnMoveRating(coach, "Good", "analysis", Date.now()));
-      }
     } finally {
       setReviewingGame(false);
     }
-  }, [coach, engineLabel, game, gameOver, reviewingGame]);
+  }, [engineLabel, game, gameOver, reviewingGame]);
 
   const displayFen = viewFen || game.fen();
   const displayGame = new Chess(displayFen);
@@ -524,9 +720,96 @@ const Game = () => {
         : "-M"
       : (eval_ / 100).toFixed(1);
 
-  // Eval bar is intentionally hidden while a game is actively being played.
-  // It only re-appears once the game has finished so post-game review still
-  // surfaces a final evaluation.
+  const eloPulse = useMemo(
+    () => (gameOver ? eloPulseForResult(gameOver, difficulty.skill) : 0),
+    [difficulty.skill, gameOver]
+  );
+  const resultSummary = useMemo(
+    () =>
+      gameOver
+        ? `${summarizeResultLabel(gameOver)} - ${eloPulse > 0 ? `+${eloPulse}` : `${eloPulse}`} Elo`
+        : null,
+    [eloPulse, gameOver]
+  );
+  const gameOutcome = useMemo(() => {
+    if (!gameOver) return "Game complete";
+    if (gameOver.startsWith("White wins")) return "Victory";
+    if (gameOver.startsWith("Black wins")) return "Defeat";
+    return "Draw";
+  }, [gameOver]);
+
+  const handleAnalyzeAction = useCallback(async () => {
+    if (!gameOver) return;
+    markAnalysisTransitionStart();
+    if (!reviewReady && !reviewingGame) await analyzeFinishedGame();
+    navigate("/analyze-game");
+  }, [analyzeFinishedGame, gameOver, navigate, reviewReady, reviewingGame]);
+
+  const handleNewOpponentAction = useCallback(() => {
+    navigate("/play");
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!gameOver) return;
+    const focusFirstAction = requestAnimationFrame(() => {
+      gameOverActionRefs.current[0]?.focus();
+    });
+
+    const onOverlayKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "a") {
+        event.preventDefault();
+        handleAnalyzeAction();
+        return;
+      }
+      if (key === "r") {
+        event.preventDefault();
+        resetGame();
+        return;
+      }
+      if (key === "n") {
+        event.preventDefault();
+        handleNewOpponentAction();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const actions = gameOverActionRefs.current.filter(
+        (btn): btn is HTMLButtonElement => Boolean(btn)
+      );
+      if (!actions.length) return;
+
+      event.preventDefault();
+      const currentIndex = actions.findIndex((btn) => btn === document.activeElement);
+      if (currentIndex === -1) {
+        actions[0].focus();
+        return;
+      }
+      const delta = event.shiftKey ? -1 : 1;
+      const nextIndex = (currentIndex + delta + actions.length) % actions.length;
+      actions[nextIndex].focus();
+    };
+
+    window.addEventListener("keydown", onOverlayKeyDown);
+    return () => {
+      cancelAnimationFrame(focusFirstAction);
+      window.removeEventListener("keydown", onOverlayKeyDown);
+    };
+  }, [gameOver, handleAnalyzeAction, handleNewOpponentAction, resetGame]);
+
+  // Eval bar is intentionally hidden while a game is actively being played
+  // (per this PR's stated contract). It only re-appears once the game has
+  // finished so post-game review still surfaces a final evaluation. Daily /
+  // online modes also never have an active eval bar.
   const showEvalBar = !!gameOver;
 
   return (
@@ -542,11 +825,18 @@ const Game = () => {
             Back
           </Link>
           <h1 className="font-display text-xl font-semibold">
-            vs <span className="text-gradient-brand">Stockfish</span>
+            {isDailyMode ? "Daily" : "Practice"} <span className="text-gradient-brand">vs Stockfish</span>
           </h1>
-          <span className="ml-auto font-body text-xs text-muted-foreground border border-border rounded-full px-3 py-1">
-            {difficulty.label} (~{difficulty.rating})
-          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {isDailyMode && (
+              <span className="font-body text-xs text-primary border border-primary/40 rounded-full px-3 py-1">
+                24h / move
+              </span>
+            )}
+            <span className="font-body text-xs text-muted-foreground border border-border rounded-full px-3 py-1">
+              {difficulty.label} (~{difficulty.rating})
+            </span>
+          </div>
         </div>
       </nav>
 
@@ -606,6 +896,24 @@ const Game = () => {
                   <p className="font-body text-xs text-muted-foreground">White</p>
                 </div>
               </div>
+
+              <div className="rounded-md border border-border bg-background p-3 space-y-1">
+                <p className="font-body text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Mode
+                </p>
+                <p className="font-body text-sm text-foreground">
+                  {isDailyMode ? "Daily Chess" : "Standard Practice"}
+                </p>
+                {isDailyMode && (
+                  <p className="font-mono text-xs text-muted-foreground">
+                    Time left this move: {formatDuration(dailyClockMs)}
+                  </p>
+                )}
+                <p className="font-body text-xs text-muted-foreground">
+                  Premove: {premoveEnabled ? "On" : "Off"}{" "}
+                  {queuedPremove ? `(queued ${queuedPremove.from}-${queuedPremove.to})` : ""}
+                </p>
+              </div>
             </div>
 
             <button
@@ -647,7 +955,10 @@ const Game = () => {
                 )}
                 {reviewReady && (
                   <button
-                    onClick={() => navigate("/analyze-game")}
+                    onClick={() => {
+                      markAnalysisTransitionStart();
+                      navigate("/analyze-game");
+                    }}
                     className="w-full py-2.5 border border-border rounded-md font-body text-xs font-semibold text-foreground hover:bg-secondary transition-colors"
                   >
                     Open Full Analysis
@@ -655,7 +966,6 @@ const Game = () => {
                 )}
               </div>
             )}
-
             {coach !== "none" && (
               <div className="rounded-lg border border-border bg-card p-4 space-y-2">
                 <p className="font-display text-xs font-semibold text-foreground uppercase tracking-wider">
@@ -674,7 +984,8 @@ const Game = () => {
 
           {/* Center - Board + Eval bar */}
           <div className="lg:col-span-6 flex flex-col items-center order-1 lg:order-2">
-            <div className="flex w-full max-w-[600px] gap-2">
+            <div className={`flex w-full max-w-[600px] ${showEvalBar ? "gap-2" : ""}`}>
+
               {/* Eval bar - hidden while a game is actively in progress. */}
               {showEvalBar && (
                 <div
@@ -865,46 +1176,69 @@ const Game = () => {
                   )}
                 </AnimatePresence>
 
-                {/* Game over overlay */}
-                <AnimatePresence>
-                  {gameOver && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute inset-0 z-50 bg-background/85 backdrop-blur-sm flex flex-col items-center justify-center gap-4"
+                {gameOver && (
+                  <div className="absolute inset-0 z-[70] flex items-center justify-center bg-background/78 p-4 backdrop-blur-md">
+                    <section
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="end-game-title"
+                      className="w-full max-w-md rounded-2xl border border-border/80 bg-card/95 p-5 shadow-elevated"
                     >
-                      <Trophy className="w-12 h-12 text-foreground/80" />
-                      <p className="font-display text-2xl font-bold text-foreground">
-                        {gameOver}
+                      <p className="font-body text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                        Match Complete
                       </p>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
+                      <h2 id="end-game-title" className="mt-1 font-display text-3xl font-semibold text-foreground">
+                        {gameOutcome}
+                      </h2>
+                      <p className="mt-2 font-body text-base font-medium text-foreground/90">{resultSummary}</p>
+                      <div className="mt-5 grid gap-2">
                         <button
+                          ref={(node) => {
+                            gameOverActionRefs.current[0] = node;
+                          }}
                           onClick={async () => {
+                            markAnalysisTransitionStart();
                             if (!reviewReady && !reviewingGame) await analyzeFinishedGame();
                             navigate("/analyze-game");
                           }}
-                          disabled={reviewingGame || !engineReady || !!engineError}
-                          className="bg-card border border-border px-4 py-2 rounded-md font-body text-sm font-semibold text-foreground hover:bg-secondary transition-colors disabled:opacity-60"
+                          type="button"
+                          className="group w-full rounded-lg bg-primary px-4 py-3 text-left font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform duration-150 hover:scale-[1.01] focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
                         >
-                          {reviewingGame ? `Analyzing ${reviewProgress}/${game.history().length}` : "Analyze Game"}
+                          <span className="flex items-center justify-between">
+                            Game Analysis
+                            <span className="text-[11px] font-mono opacity-85">A</span>
+                          </span>
                         </button>
                         <button
+                          ref={(node) => {
+                            gameOverActionRefs.current[1] = node;
+                          }}
+                          type="button"
                           onClick={resetGame}
-                          className="bg-primary px-6 py-2.5 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
+                          className="w-full rounded-lg border border-border bg-card px-4 py-3 text-left font-body text-sm font-semibold text-foreground transition-transform duration-150 hover:scale-[1.01] hover:bg-secondary/70 focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
                         >
-                          Play Again
+                          <span className="flex items-center justify-between">
+                            Rematch
+                            <span className="text-[11px] font-mono text-muted-foreground">R</span>
+                          </span>
                         </button>
                         <button
-                          onClick={() => navigate("/play")}
-                          className="bg-card border border-border px-4 py-2 rounded-md font-body text-sm font-semibold text-foreground hover:bg-secondary transition-colors"
+                          ref={(node) => {
+                            gameOverActionRefs.current[2] = node;
+                          }}
+                          type="button"
+                          onClick={handleNewOpponentAction}
+                          className="w-full rounded-lg border border-border bg-card px-4 py-3 text-left font-body text-sm font-semibold text-foreground transition-transform duration-150 hover:scale-[1.01] hover:bg-secondary/70 focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
                         >
-                          Go to Menu
+                          <span className="flex items-center justify-between">
+                            New Opponent
+                            <span className="text-[11px] font-mono text-muted-foreground">N</span>
+                          </span>
                         </button>
                       </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                    </section>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -922,7 +1256,9 @@ const Game = () => {
                   : engineThinking
                   ? "Stockfish is thinking..."
                   : game.turn() === "w"
-                  ? "Your turn (White)"
+                  ? isDailyMode
+                    ? `Your turn (Daily) - ${formatDuration(dailyClockMs)} left`
+                    : "Your turn (White)"
                   : "Black to move"}
                 {game.inCheck() && !gameOver && (
                   <span className="ml-2 text-destructive font-semibold">Check!</span>

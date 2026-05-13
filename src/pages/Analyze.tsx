@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Chess, Square } from "chess.js";
 import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, Sparkles } from "lucide-react";
 import { PIECE_URLS } from "@/lib/chess-constants";
@@ -21,8 +21,18 @@ const examplePgn = `[Event "Casual"]
 
 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O Be7 6. Re1 b5 7. Bb3 d6 8. c3 O-O 9. h3`;
 
+interface AnalyzeLocationState {
+  pgn?: string;
+}
+
 const Analyze = () => {
-  const [pgnInput, setPgnInput] = useState(examplePgn);
+  const location = useLocation();
+  const incomingPgn = useMemo(() => {
+    const state = location.state as AnalyzeLocationState | null;
+    if (!state?.pgn) return examplePgn;
+    return state.pgn.trim() ? state.pgn : examplePgn;
+  }, [location.state]);
+  const [pgnInput, setPgnInput] = useState(incomingPgn);
   const [error, setError] = useState<string | null>(null);
   const [mainLine, setMainLine] = useState<Chess | null>(null);
   const [plyIndex, setPlyIndex] = useState(0);
@@ -45,6 +55,11 @@ const Analyze = () => {
     const h = mainLine.history();
     return h[plyIndex - 1] ?? null;
   }, [mainLine, plyIndex]);
+
+  useEffect(() => {
+    setPgnInput((prev) => (prev === incomingPgn ? prev : incomingPgn));
+  }, [incomingPgn]);
+
   const loadPgn = useCallback(() => {
     setError(null);
     const g = new Chess();
