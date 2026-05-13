@@ -1,3 +1,5 @@
+import { Chess } from "chess.js";
+
 // Stockfish 18 - prefers full NNUE single-threaded build (strong; no COEP/COOP).
 // Falls back to lite if the full WASM fails to load.
 
@@ -7,9 +9,16 @@ export interface StockfishInfo {
   depth?: number;
   score?: number;
   mate?: number;
-  bestMove?: string;
-  pv?: string;
   pvLine?: string;
+  multipv?: number;
+}
+
+export interface StockfishTopLine {
+  multipv: number;
+  depth: number;
+  score?: number;
+  mate?: number;
+  pv: string[];
 }
 
 const ENGINE_FULL = { script: "/stockfish/stockfish-18-single.js", label: "Stockfish 18 (NNUE)" };
@@ -36,13 +45,13 @@ export function formatEngineInitError(e: unknown): string {
   return "Unknown error";
 }
 
+/** Most builds emit string payloads; older shims wrap them as `{ data }`. */
 function parseWorkerPayload(data: unknown): string[] {
-  if (data == null) return [];
   if (typeof data === "string") return data.split(/\r?\n/).filter(Boolean);
-  if (typeof data === "object" && data !== null && "data" in data && typeof (data as { data: unknown }).data === "string") {
-    return parseWorkerPayload((data as { data: string }).data);
+  if (data && typeof data === "object" && "data" in data) {
+    return parseWorkerPayload((data as { data: unknown }).data);
   }
-  return [String(data)];
+  return data == null ? [] : [String(data)];
 }
 
 export class StockfishEngine {
@@ -127,26 +136,25 @@ export class StockfishEngine {
   }
 
   private handleLine(line: string) {
-    if (line.startsWith("info") && line.includes("score")) {
+    if (line.startsWith("info") && line.includes("score") && this.onInfo) {
       const info: StockfishInfo = {};
 
-      const depthMatch = line.match(/depth (\d+)/);
+      const depthMatch = line.match(/\bdepth (\d+)/);
       if (depthMatch) info.depth = parseInt(depthMatch[1], 10);
 
-      const cpMatch = line.match(/score cp (-?\d+)/);
+      const cpMatch = line.match(/\bscore cp (-?\d+)/);
       if (cpMatch) info.score = parseInt(cpMatch[1], 10);
 
-      const mateMatch = line.match(/score mate (-?\d+)/);
+      const mateMatch = line.match(/\bscore mate (-?\d+)/);
       if (mateMatch) info.mate = parseInt(mateMatch[1], 10);
 
-      const pvMatch = line.match(/\bpv (.+)/);
-      if (pvMatch) {
-        const full = pvMatch[1].trim();
-        info.pvLine = full;
-        info.pv = full.split(/\s+/)[0];
-      }
+      const multiPvMatch = line.match(/multipv (\d+)/);
+      if (multiPvMatch) info.multipv = parseInt(multiPvMatch[1], 10);
 
-      if (this.onInfo && (info.score !== undefined || info.mate !== undefined)) {
+      const pvMatch = line.match(/\bpv (.+)/);
+      if (pvMatch) info.pvLine = pvMatch[1].trim();
+
+      if (info.score !== undefined || info.mate !== undefined) {
         this.onInfo(info);
       }
     }
@@ -236,6 +244,62 @@ export class StockfishEngine {
           info.depth >= targetDepth &&
           (latest.score !== undefined || latest.mate !== undefined)
         ) {
+          done();
+        }
+      };
+
+      this.worker!.postMessage(`position fen ${fen}`);
+      this.worker!.postMessage(`go depth ${targetDepth}`);
+    });
+  }
+
+  async probeTopLines(
+    fen: string,
+    targetDepth: number,
+    multiPv = 3,
+    timeoutMs = 5500
+  ): Promise<StockfishTopLine[]> {
+    if (!this.worker) return [];
+    await this.flushStop();
+    if (!this.worker) return [];
+
+    const targetLines = Math.max(
+      1,
+      Math.min(Math.max(1, multiPv), new Chess(fen).moves().length || 1)
+    );
+    this.worker.postMessage(`setoption name MultiPV value ${Math.max(1, multiPv)}`);
+
+    return new Promise((resolve) => {
+      const seen = new Map<number, StockfishTopLine>();
+      let maxDepth = 0;
+      let finished = false;
+
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        window.clearTimeout(t);
+        this.onInfo = null;
+        this.worker?.postMessage("setoption name MultiPV value 1");
+        this.worker?.postMessage("stop");
+        const lines = [...seen.values()].sort((a, b) => a.multipv - b.multipv);
+        resolve(lines);
+      };
+
+      const t = window.setTimeout(() => done(), timeoutMs);
+      this.goPurpose = "eval";
+      this.onInfo = (info: StockfishInfo) => {
+        const idx = info.multipv ?? 1;
+        const pvMoves = info.pvLine?.trim().split(/\s+/).filter(Boolean) ?? [];
+        const prev = seen.get(idx);
+        seen.set(idx, {
+          multipv: idx,
+          depth: info.depth ?? prev?.depth ?? 0,
+          score: info.score ?? prev?.score,
+          mate: info.mate ?? prev?.mate,
+          pv: pvMoves.length ? pvMoves : prev?.pv ?? [],
+        });
+        if (info.depth && info.depth > maxDepth) maxDepth = info.depth;
+        if (maxDepth >= targetDepth && seen.size >= targetLines) {
           done();
         }
       };

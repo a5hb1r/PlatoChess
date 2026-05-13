@@ -79,31 +79,24 @@ export function rateMoveLikeChessCom(
   const isBest = !!bestMoveUci && playedUci === bestMoveUci;
   const isCheck = playedMove.san.includes("+") || playedMove.san.includes("#");
   const isCapture = playedMove.san.includes("x");
-  const isSacrifice = !isCapture && /[QRBN]/.test(playedMove.san) && cpLoss <= 20;
+  const isSacrifice = !isCapture && /[QRBN]/.test(playedMove.san) && cpLoss <= 24;
 
-  if (isBest || cpLoss <= 8) {
-    return { label: "Best", color: "text-foreground", cpLoss, bestMove: bestMoveUci };
-  }
-  if ((isSacrifice || (isCheck && cpLoss <= 15)) && cpLoss <= 20) {
+  if ((isSacrifice || (isCheck && cpLoss <= 20)) && cpLoss <= 24) {
     return { label: "Brilliant", color: "text-foreground font-semibold", cpLoss, bestMove: bestMoveUci };
   }
-  if (isCheck && cpLoss <= 22) {
-    return { label: "Great", color: "text-foreground/90", cpLoss, bestMove: bestMoveUci };
+  if (isBest || cpLoss <= 10) {
+    return { label: "Best", color: "text-foreground", cpLoss, bestMove: bestMoveUci };
   }
-  if (cpLoss <= 25) {
+  if (cpLoss <= 30) {
     return { label: "Excellent", color: "text-muted-foreground", cpLoss, bestMove: bestMoveUci };
   }
-  if (cpLoss <= 45) {
+  if (cpLoss <= 60) {
     return { label: "Good", color: "text-muted-foreground/90", cpLoss, bestMove: bestMoveUci };
   }
-  if (cpLoss <= 90) {
+  if (cpLoss <= 110) {
     return { label: "Inaccuracy", color: "text-foreground/70", cpLoss, bestMove: bestMoveUci };
   }
-  // "Miss" = missed tactical/strategic chance, between inaccuracy and full blunder.
-  if (cpLoss <= 140 && !isCapture) {
-    return { label: "Miss", color: "text-foreground/65", cpLoss, bestMove: bestMoveUci };
-  }
-  if (cpLoss <= 180) {
+  if (cpLoss <= 190) {
     return { label: "Mistake", color: "text-foreground/55", cpLoss, bestMove: bestMoveUci };
   }
   return { label: "Blunder", color: "text-destructive", cpLoss, bestMove: bestMoveUci };
