@@ -9,7 +9,6 @@ import {
   Trophy,
   User,
   Bot,
-  BarChart3,
   Loader2,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -22,9 +21,7 @@ import {
 } from "@/lib/stockfish";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
 import { BoardThemeSelect } from "@/components/BoardThemeSelect";
-import { OpeningPanel } from "@/components/OpeningPanel";
 import { PIECE_URLS } from "@/lib/chess-constants";
-import { probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
 import {
   type CoachId,
   coachOnEval,
@@ -32,11 +29,7 @@ import {
 } from "@/lib/philosopher-coaches";
 import { reviewTone } from "@/lib/review-colors";
 import {
-  markAnalysisTransitionStart,
   saveLatestFinishedGame,
-  saveLatestGameReview,
-  scoreForLabel,
-  type ReviewedPly,
 } from "@/lib/game-review";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -131,10 +124,6 @@ const Game = () => {
   const [moveHistory, setMoveHistory] = useState<
     { san: string; rating?: { label: string; color: string }; cpLoss?: number; bestUci?: string }[]
   >([]);
-  const [reviewingGame, setReviewingGame] = useState(false);
-  const [reviewProgress, setReviewProgress] = useState(0);
-  const [reviewSummary, setReviewSummary] = useState<string | null>(null);
-  const [reviewReady, setReviewReady] = useState(false);
   const [eval_, setEval_] = useState<number>(0);
   const [engineReady, setEngineReady] = useState(false);
   const [engineError, setEngineError] = useState<string | null>(null);
@@ -172,8 +161,6 @@ const Game = () => {
   const gameFen = game.fen();
   const gameTurn = game.turn();
   const gameIsOver = game.isGameOver();
-
-  const sanHistory = useMemo(() => game.history(), [game]);
 
   const allLegalDestinations = useMemo(() => {
     const s = new Set<Square>();
@@ -583,8 +570,6 @@ const Game = () => {
     setPromotionSquare(null);
     setDragging(null);
     setCoachLine(null);
-    setReviewSummary(null);
-    setReviewReady(false);
     clearQueuedPremove();
     if (isDailyMode) {
       setDailyMoveDeadlineMs(Date.now() + DAILY_MOVE_WINDOW_MS);
@@ -623,88 +608,6 @@ const Game = () => {
     }
   };
 
-  const analyzeFinishedGame = useCallback(async () => {
-    if (!engineRef.current || !gameOver || reviewingGame) return;
-    const history = game.history({ verbose: true });
-    if (history.length === 0) return;
-
-    setReviewingGame(true);
-    setReviewProgress(0);
-    setReviewSummary(null);
-
-    try {
-      const engine = engineRef.current;
-      const replay = new Chess();
-      let beforeProbe = await engine.probeEval(replay.fen(), 10, 2500);
-      const reviewed: { san: string; rating?: { label: string; color: string }; cpLoss?: number; bestUci?: string }[] = [];
-      const reviewedPlies: ReviewedPly[] = [];
-
-      for (let i = 0; i < history.length; i++) {
-        const mv = history[i];
-        const side = replay.turn();
-        const fenBefore = replay.fen();
-        const best = await engine.getBestMove(fenBefore, 10);
-
-        replay.move(mv);
-        const afterProbe = await engine.probeEval(replay.fen(), 10, 2500);
-        const rated = rateMoveLikeChessCom(side, beforeProbe, afterProbe, mv, best || undefined);
-        reviewed.push({
-          san: mv.san,
-          rating: { label: rated.label, color: rated.color },
-          cpLoss: rated.cpLoss,
-          bestUci: rated.bestMove,
-        });
-        reviewedPlies.push({
-          ply: i + 1,
-          side,
-          san: mv.san,
-          label: rated.label,
-          colorClass: rated.color,
-          cpLoss: rated.cpLoss,
-          bestUci: rated.bestMove,
-          playedUci: `${mv.from}${mv.to}${mv.promotion ?? ""}`,
-          fenBefore,
-          fenAfter: replay.fen(),
-          evalBeforeCp: probeResultToCp(beforeProbe),
-          evalAfterCp: probeResultToCp(afterProbe),
-        });
-        beforeProbe = afterProbe;
-        setReviewProgress(i + 1);
-      }
-
-      const summary = reviewed.reduce<Record<string, number>>((acc, m) => {
-        const k = m.rating?.label || "Unrated";
-        acc[k] = (acc[k] || 0) + 1;
-        return acc;
-      }, {});
-      const top = ["Brilliant", "Best", "Excellent", "Good", "Inaccuracy", "Mistake", "Blunder"]
-        .filter((k) => summary[k])
-        .map((k) => `${k}: ${summary[k]}`)
-        .join("  |  ");
-
-      setMoveHistory(reviewed);
-      setReviewSummary(top || "Review complete.");
-      setReviewReady(true);
-      const bySide = { w: [] as number[], b: [] as number[] };
-      for (const m of reviewedPlies) bySide[m.side].push(scoreForLabel(m.label));
-      const avg = (a: number[]) => (a.length ? (a.reduce((s, x) => s + x, 0) / a.length) * 100 : 0);
-      saveLatestGameReview({
-        createdAt: Date.now(),
-        pgn: game.pgn(),
-        result: gameOver || "Game complete",
-        engine: engineLabel,
-        depth: 10,
-        accuracy: {
-          w: Number(avg(bySide.w).toFixed(1)),
-          b: Number(avg(bySide.b).toFixed(1)),
-        },
-        moves: reviewedPlies,
-      });
-    } finally {
-      setReviewingGame(false);
-    }
-  }, [engineLabel, game, gameOver, reviewingGame]);
-
   const displayFen = viewFen || game.fen();
   const displayGame = new Chess(displayFen);
 
@@ -736,12 +639,15 @@ const Game = () => {
     return "Draw";
   }, [gameOver]);
 
-  const handleAnalyzeAction = useCallback(async () => {
+  const handleAnalyzeAction = useCallback(() => {
     if (!gameOver) return;
-    markAnalysisTransitionStart();
-    if (!reviewReady && !reviewingGame) await analyzeFinishedGame();
-    navigate("/analyze-game");
-  }, [analyzeFinishedGame, gameOver, navigate, reviewReady, reviewingGame]);
+    navigate("/analyze", {
+      state: {
+        pgn: game.pgn(),
+        source: "end-of-game-overlay",
+      },
+    });
+  }, [game, gameOver, navigate]);
 
   const handleNewOpponentAction = useCallback(() => {
     navigate("/play");
@@ -806,7 +712,6 @@ const Game = () => {
 
   // Practice mode keeps the eval bar visible; online/daily modes hide it.
   const showEvalBar = isPracticeMode;
-
   return (
     <div className="min-h-screen bg-background">
       {/* Nav */}
@@ -921,46 +826,6 @@ const Game = () => {
 
             <BoardThemeSelect />
 
-            <OpeningPanel moves={sanHistory} />
-
-            {gameOver && (
-              <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-                <button
-                  onClick={analyzeFinishedGame}
-                  disabled={reviewingGame || !engineReady || !!engineError}
-                  className="w-full py-2.5 bg-primary rounded-md font-body text-xs font-semibold text-primary-foreground disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {reviewingGame ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Reviewing {reviewProgress}/{game.history().length}
-                    </>
-                  ) : (
-                    <>
-                      <BarChart3 className="w-3.5 h-3.5" />
-                      Analyze Completed Game
-                    </>
-                  )}
-                </button>
-                <p className="font-body text-[11px] text-muted-foreground">
-                  Move ratings stay hidden during play and appear only after this review, similar to Chess.com.
-                </p>
-                {reviewSummary && (
-                  <p className="font-body text-[11px] text-foreground/80 leading-relaxed">{reviewSummary}</p>
-                )}
-                {reviewReady && (
-                  <button
-                    onClick={() => {
-                      markAnalysisTransitionStart();
-                      navigate("/analyze-game");
-                    }}
-                    className="w-full py-2.5 border border-border rounded-md font-body text-xs font-semibold text-foreground hover:bg-secondary transition-colors"
-                  >
-                    Open Full Analysis
-                  </button>
-                )}
-              </div>
-            )}
             {coach !== "none" && (
               <div className="rounded-lg border border-border bg-card p-4 space-y-2">
                 <p className="font-display text-xs font-semibold text-foreground uppercase tracking-wider">
@@ -1190,12 +1055,8 @@ const Game = () => {
                           ref={(node) => {
                             gameOverActionRefs.current[0] = node;
                           }}
-                          onClick={async () => {
-                            markAnalysisTransitionStart();
-                            if (!reviewReady && !reviewingGame) await analyzeFinishedGame();
-                            navigate("/analyze-game");
-                          }}
                           type="button"
+                          onClick={handleAnalyzeAction}
                           className="group w-full rounded-lg bg-primary px-4 py-3 text-left font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform duration-150 hover:scale-[1.01] focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
                         >
                           <span className="flex items-center justify-between">
