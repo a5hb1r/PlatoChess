@@ -1,5 +1,5 @@
-import { Chess } from "chess.js";
-import { probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
+import { Chess, type Color } from "chess.js";
+import { moveIsSacrifice, probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
 import { scoreForLabel, type GameReviewReport, type ReviewedPly } from "@/lib/game-review";
 import type { StockfishEngine } from "@/lib/stockfish";
 
@@ -10,6 +10,10 @@ interface BuildReviewParams {
   engine: StockfishEngine;
   depth?: number;
   onProgress?: (done: number, total: number) => void;
+  /** Player Elo, used to scale brilliancy detection for the player's own moves (spec Section 3). */
+  playerElo?: number;
+  /** Which color the (human) player controlled. Defaults to White. */
+  playerColor?: Color;
 }
 
 export async function buildGameReviewReport({
@@ -19,6 +23,8 @@ export async function buildGameReviewReport({
   engine,
   depth = 10,
   onProgress,
+  playerElo,
+  playerColor = "w",
 }: BuildReviewParams): Promise<GameReviewReport> {
   const game = new Chess();
   game.loadPgn(pgn, { strict: false });
@@ -37,9 +43,16 @@ export async function buildGameReviewReport({
     const fenBefore = replay.fen();
     const best = await engine.getBestMove(fenBefore, depth);
 
+    const playedUci = `${mv.from}${mv.to}${mv.promotion ?? ""}`;
+    const isSacrifice = moveIsSacrifice(fenBefore, mv);
+
     replay.move(mv);
     const afterProbe = await engine.probeEval(replay.fen(), depth, 2500);
-    const rated = rateMoveLikeChessCom(side, beforeProbe, afterProbe, mv, best || undefined);
+    const rated = rateMoveLikeChessCom(side, beforeProbe, afterProbe, mv, best || undefined, {
+      playerElo: side === playerColor ? playerElo : undefined,
+      isOnlyGoodMove: !!best && playedUci === best,
+      isSacrifice,
+    });
     reviewedPlies.push({
       ply: i + 1,
       side,
@@ -48,7 +61,7 @@ export async function buildGameReviewReport({
       colorClass: rated.color,
       cpLoss: rated.cpLoss,
       bestUci: rated.bestMove,
-      playedUci: `${mv.from}${mv.to}${mv.promotion ?? ""}`,
+      playedUci,
       fenBefore,
       fenAfter: replay.fen(),
       evalBeforeCp: probeResultToCp(beforeProbe),
