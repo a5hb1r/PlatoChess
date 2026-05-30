@@ -69,6 +69,14 @@ export default {
         "warm-gray": "hsl(var(--warm-gray))",
         "chess-light": "hsl(var(--chess-light))",
         "chess-dark": "hsl(var(--chess-dark))",
+        /* chess.com-inspired board UI palette (fixed brand colors) */
+        cc: {
+          bg: "#302e2b",        // deep, matte warm charcoal (page background)
+          panel: "#262421",     // crisp dark gray (sidebar / player panels)
+          border: "#3c3a37",    // subtle mid-gray dividers
+          green: "#769656",     // muted olive/chess green accent
+          "green-dark": "#5b7641",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
