@@ -21,6 +21,8 @@ import {
 import { Link, useSearchParams } from "react-router-dom";
 import { Chess, Color, Square, PieceSymbol } from "chess.js";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
+import { GameSettingsMenu } from "@/components/GameSettingsMenu";
+import { useTheme } from "@/contexts/ThemeContext";
 import { PIECE_URLS } from "@/lib/chess-constants";
 import { loadPersonalizedPuzzles } from "@/lib/game-review";
 
@@ -600,6 +602,7 @@ function getSquareFromPoint(
 }
 
 const Puzzles = () => {
+  const { showValidMoves } = useTheme();
   const [searchParams] = useSearchParams();
   const [category, setCategory] = useState("all");
   const [puzzleIndex, setPuzzleIndex] = useState(0);
@@ -889,6 +892,7 @@ const Puzzles = () => {
             <span className="font-body text-xs text-muted-foreground border border-border rounded-full px-3 py-1">
               {solved.size}/{allPuzzles.length} solved
             </span>
+            <GameSettingsMenu />
           </div>
         </div>
       </nav>
@@ -1055,7 +1059,7 @@ const Puzzles = () => {
                         />
                       )}
 
-                      {isValidTarget && !isDragTarget && (
+                      {showValidMoves && isValidTarget && !isDragTarget && (
                         <div className="absolute z-30 flex items-center justify-center w-full h-full pointer-events-none">
                           {piece && !isDragSource ? (
                             <div className="w-[82%] h-[82%] rounded-full border-[5px] border-cyan-100/45" />

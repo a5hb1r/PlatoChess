@@ -3,6 +3,32 @@ import type { Move } from "chess.js";
 
 let ctx: AudioContext | null = null;
 
+export const SOUND_STORAGE_KEY = "platochess-sound-enabled";
+
+/** Global mute switch for all board SFX. Read once from storage so playback is
+ *  correct even before the React settings provider mounts. */
+let soundEnabled = (() => {
+  if (typeof localStorage === "undefined") return true;
+  try {
+    return localStorage.getItem(SOUND_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+})();
+
+export function setSoundsEnabled(enabled: boolean): void {
+  soundEnabled = enabled;
+  try {
+    localStorage.setItem(SOUND_STORAGE_KEY, String(enabled));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function areSoundsEnabled(): boolean {
+  return soundEnabled;
+}
+
 /** Browsers suspend AudioContext until a user gesture; call once on app mount. */
 export function installAudioUnlockListeners(): void {
   if (typeof window === "undefined") return;
@@ -53,6 +79,7 @@ function playNoiseBurst(
   filterQ = 1,
   startOffset = 0
 ) {
+  if (!soundEnabled) return;
   const c = getCtx();
   const t = c.currentTime + startOffset;
 
@@ -79,6 +106,7 @@ function playTone(
   volume: number,
   delay = 0
 ) {
+  if (!soundEnabled) return;
   const c = getCtx();
   const t = c.currentTime + delay;
 

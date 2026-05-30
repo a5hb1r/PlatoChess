@@ -20,7 +20,8 @@ import {
   formatEngineInitError,
 } from "@/lib/stockfish";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
-import { BoardThemeSelect } from "@/components/BoardThemeSelect";
+import { GameSettingsMenu } from "@/components/GameSettingsMenu";
+import { useTheme } from "@/contexts/ThemeContext";
 import { PIECE_URLS } from "@/lib/chess-constants";
 import {
   type CoachId,
@@ -106,6 +107,7 @@ function eloPulseForResult(result: string, skillLevel: number): number {
 
 const Game = () => {
   const { user } = useAuth();
+  const { showValidMoves } = useTheme();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const difficultyParam = parseInt(searchParams.get("level") || "2");
@@ -736,6 +738,7 @@ const Game = () => {
             <span className="font-body text-xs text-muted-foreground border border-border rounded-full px-3 py-1">
               {difficulty.label} (~{difficulty.rating})
             </span>
+            <GameSettingsMenu />
           </div>
         </div>
       </nav>
@@ -824,8 +827,6 @@ const Game = () => {
               New Game
             </button>
 
-            <BoardThemeSelect />
-
             {coach !== "none" && (
               <div className="rounded-lg border border-border bg-card p-4 space-y-2">
                 <p className="font-display text-xs font-semibold text-foreground uppercase tracking-wider">
@@ -888,6 +889,7 @@ const Game = () => {
                     const isDragSource = dragging?.square === square;
                     const isDragTarget = dragOver === square && isValidTarget;
                     const showAmbienceDots =
+                      showValidMoves &&
                       !selectedSquare &&
                       !dragging &&
                       game.turn() === "w" &&
@@ -965,7 +967,7 @@ const Game = () => {
                         )}
 
                         {/* Valid move indicator */}
-                        {isValidTarget && !isDragTarget && (
+                        {showValidMoves && isValidTarget && !isDragTarget && (
                           <div className="absolute z-30 flex items-center justify-center w-full h-full pointer-events-none">
                             {piece && !isDragSource ? (
                               <div className="w-[82%] h-[82%] rounded-full border-[5px] border-cyan-100/45" />
