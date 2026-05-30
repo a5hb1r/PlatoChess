@@ -4,12 +4,19 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  ChevronFirst,
+  ChevronLast,
   RotateCcw,
   History,
-  Trophy,
   User,
   Bot,
   Loader2,
+  ListOrdered,
+  Users,
+  MessageSquare,
+  Flag,
+  Handshake,
+  Send,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Chess, Square, PieceSymbol } from "chess.js";
@@ -46,6 +53,15 @@ const DIFFICULTY_LEVELS = [
 const ENGINE_MOVE_DELAY_MS = 180;
 const EVAL_UPDATE_INTERVAL_MS = 120;
 
+// Default per-player clock for the chess.com-style player banners. Practice
+// games versus Stockfish have no enforced time control, so the clocks are a
+// cosmetic 10-minute countdown that simply pauses at 0 (it never flags / ends
+// the game) and visually indicates whose turn it is.
+const PRACTICE_CLOCK_MS = 10 * 60 * 1000;
+
+type SidebarTab = "moves" | "players" | "chat";
+type ChatMessage = { id: number; author: string; text: string };
+
 const DAILY_MOVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PREMOVE_STORAGE_KEY = "plato:premove-enabled";
 const PREMOVE_QUEUE_STORAGE_KEY = "plato:queued-premove";
@@ -72,6 +88,18 @@ function formatDuration(ms: number): string {
   const minutes = Math.floor((clamped % (60 * 60 * 1000)) / (60 * 1000));
   const seconds = Math.floor((clamped % (60 * 1000)) / 1000);
   return `${hours}h ${minutes}m ${seconds}s`;
+}
+
+/** Compact clock for the player banners (m:ss, or h:mm:ss past an hour). */
+function formatClock(ms: number): string {
+  const clamped = Math.max(0, ms);
+  const totalSeconds = Math.floor(clamped / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+  return `${minutes}:${pad(seconds)}`;
 }
 
 // Helper to get square from mouse/touch position relative to board
@@ -143,6 +171,19 @@ const Game = () => {
   );
   const [dailyClockMs, setDailyClockMs] = useState<number>(DAILY_MOVE_WINDOW_MS);
 
+  // chess.com-style dashboard UI state
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("moves");
+  const [whiteClockMs, setWhiteClockMs] = useState<number>(PRACTICE_CLOCK_MS);
+  const [blackClockMs, setBlackClockMs] = useState<number>(PRACTICE_CLOCK_MS);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [profile, setProfile] = useState<{
+    username: string | null;
+    display_name: string | null;
+    rating: number | null;
+    avatar_url: string | null;
+  } | null>(null);
+
   // Drag state
   const [dragging, setDragging] = useState<{
     square: Square;
@@ -187,13 +228,21 @@ const Game = () => {
 
     supabase
       .from("profiles")
-      .select("premove_enabled")
+      .select("premove_enabled, username, display_name, rating, avatar_url")
       .eq("user_id", user.id)
       .maybeSingle()
       .then(({ data }) => {
         const enabled = data?.premove_enabled ?? true;
         setPremoveEnabled(enabled);
         localStorage.setItem(PREMOVE_STORAGE_KEY, JSON.stringify(enabled));
+        if (data) {
+          setProfile({
+            username: data.username ?? null,
+            display_name: data.display_name ?? null,
+            rating: data.rating ?? null,
+            avatar_url: data.avatar_url ?? null,
+          });
+        }
       });
   }, [user]);
 
@@ -246,6 +295,22 @@ const Game = () => {
     const interval = window.setInterval(tick, 1000);
     return () => window.clearInterval(interval);
   }, [dailyMoveDeadlineMs, game, gameOver, isDailyMode]);
+
+  // Cosmetic per-player countdown that ticks for whoever is on the move. It
+  // never flags the game (just clamps at 0) so it cannot interfere with the
+  // practice-vs-engine flow; it only signals whose turn it is. Daily mode keeps
+  // its own dedicated 24h-per-move clock instead.
+  useEffect(() => {
+    if (isDailyMode || gameOver || viewFen || gameIsOver) return;
+    const interval = window.setInterval(() => {
+      if (gameTurn === "w") {
+        setWhiteClockMs((ms) => Math.max(0, ms - 1000));
+      } else {
+        setBlackClockMs((ms) => Math.max(0, ms - 1000));
+      }
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [gameTurn, gameOver, viewFen, gameIsOver, isDailyMode]);
 
   // Init Stockfish
   useEffect(() => {
@@ -570,12 +635,22 @@ const Game = () => {
     setPromotionSquare(null);
     setDragging(null);
     setCoachLine(null);
+    setWhiteClockMs(PRACTICE_CLOCK_MS);
+    setBlackClockMs(PRACTICE_CLOCK_MS);
+    setChatMessages([]);
     clearQueuedPremove();
     if (isDailyMode) {
       setDailyMoveDeadlineMs(Date.now() + DAILY_MOVE_WINDOW_MS);
       setDailyClockMs(DAILY_MOVE_WINDOW_MS);
     }
   }, [clearQueuedPremove, isDailyMode]);
+
+  // Navigation cursor. `currentPly` = number of plies applied in the currently
+  // displayed position. When viewing the live position viewFen is null and the
+  // cursor sits at the end; the start position is represented by viewFen set to
+  // the initial board with historyIndex === -1.
+  const totalPlies = moveHistory.length;
+  const currentPly = viewFen === null ? totalPlies : historyIndex + 1;
 
   const goToMove = (index: number) => {
     const fullHistory = game.history();
@@ -587,29 +662,118 @@ const Game = () => {
     setHistoryIndex(index);
   };
 
+  const goToStart = () => {
+    if (totalPlies === 0) return;
+    setViewFen(new Chess().fen());
+    setHistoryIndex(-1);
+  };
+
+  const goToLast = () => {
+    setViewFen(null);
+    setHistoryIndex(-1);
+  };
+
   const goBack = () => {
-    const fullHistory = game.history();
-    const current = historyIndex === -1 ? fullHistory.length - 1 : historyIndex - 1;
-    if (current >= 0) goToMove(current);
-    else {
-      setViewFen(new Chess().fen());
-      setHistoryIndex(-1);
-    }
+    const target = currentPly - 1;
+    if (target <= 0) goToStart();
+    else goToMove(target - 1);
   };
 
   const goForward = () => {
-    const fullHistory = game.history();
-    const current = historyIndex === -1 ? fullHistory.length : historyIndex + 1;
-    if (current < fullHistory.length) {
-      goToMove(current);
+    const target = currentPly + 1;
+    if (target >= totalPlies) goToLast();
+    else goToMove(target - 1);
+  };
+
+  const handleResign = useCallback(() => {
+    if (gameOver) return;
+    ChessSounds.gameOver();
+    setGameOver("Black wins - White resigned.");
+  }, [gameOver]);
+
+  const handleOfferDraw = useCallback(() => {
+    if (gameOver) return;
+    // Versus the engine, accept the offer only in a roughly balanced position.
+    if (Math.abs(eval_) <= 40) {
+      ChessSounds.gameOver();
+      setGameOver("Draw by agreement.");
+      toast.success("Stockfish accepted your draw offer.");
     } else {
-      setViewFen(null);
-      setHistoryIndex(-1);
+      toast.message("Stockfish declined the draw offer.");
     }
+  }, [eval_, gameOver]);
+
+  const sendChat = () => {
+    const text = chatDraft.trim();
+    if (!text) return;
+    setChatMessages((prev) => [
+      ...prev,
+      { id: Date.now(), author: "You", text },
+    ]);
+    setChatDraft("");
+  };
+
+  // A single move cell in the sidebar move log. Highlights with a distinct
+  // background when it is the position currently shown on the board.
+  const renderMoveCell = (
+    move: { san: string; rating?: { label: string; color: string } } | undefined,
+    ply: number
+  ) => {
+    if (!move) return <div />;
+    const active = historyIndex === ply;
+    const toneText = move.rating?.label
+      ? reviewTone(move.rating.label).text
+      : "text-gray-200";
+    return (
+      <button
+        type="button"
+        onClick={() => goToMove(ply)}
+        className={`flex items-center gap-1.5 px-3 py-2 text-left font-body text-sm transition-colors ${
+          active
+            ? "bg-cc-green font-semibold text-white"
+            : `hover:bg-white/5 ${toneText}`
+        }`}
+      >
+        <span>{move.san}</span>
+        {move.rating?.label && (
+          <span
+            className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${reviewTone(
+              move.rating.label
+            ).chip}`}
+          >
+            {move.rating.label}
+          </span>
+        )}
+      </button>
+    );
   };
 
   const displayFen = viewFen || game.fen();
   const displayGame = new Chess(displayFen);
+
+  // Player banner identities. The user plays White (bottom banner); the engine
+  // (or selected philosopher coach) plays Black (top banner).
+  const userName =
+    profile?.display_name?.trim() ||
+    profile?.username?.trim() ||
+    user?.email?.split("@")[0] ||
+    "You";
+  const userRating = profile?.rating ?? 1200;
+  const opponentName = coach !== "none" ? COACHES[coach].name : "Stockfish";
+  const opponentRating = difficulty.rating;
+  const isLiveView = !viewFen && !gameOver;
+  const userTurnActive = isLiveView && gameTurn === "w";
+  const opponentTurnActive = isLiveView && gameTurn === "b";
+  const userClockLabel = isDailyMode
+    ? userTurnActive
+      ? formatDuration(dailyClockMs)
+      : "24h / move"
+    : formatClock(whiteClockMs);
+  const opponentClockLabel = isDailyMode
+    ? opponentTurnActive
+      ? formatDuration(dailyClockMs)
+      : "24h / move"
+    : formatClock(blackClockMs);
 
   const evalPawns = Math.max(-10, Math.min(10, eval_ / 100));
   const whitePercent = 50 + evalPawns * 5;
@@ -713,143 +877,79 @@ const Game = () => {
   // Practice mode keeps the eval bar visible; online/daily modes hide it.
   const showEvalBar = isPracticeMode;
   return (
-    <div className="min-h-screen bg-background">
-      {/* Nav */}
-      <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
-        <div className="container mx-auto flex items-center gap-4 px-6 py-4">
+    <div className="flex min-h-screen flex-col bg-cc-bg text-gray-200">
+      {/* Top navigation bar */}
+      <nav className="border-b border-cc-border bg-cc-panel">
+        <div className="mx-auto flex w-full max-w-[1280px] items-center gap-4 px-4 py-3 sm:px-6">
           <Link
             to="/play"
-            className="flex items-center gap-2 font-body text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-2 font-body text-sm text-gray-400 transition-colors hover:text-gray-100"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
           </Link>
-          <h1 className="font-display text-xl font-semibold">
-            {isDailyMode ? "Daily" : "Practice"} <span className="text-gradient-brand">vs Stockfish</span>
+          <h1 className="font-display text-lg font-semibold text-gray-100 sm:text-xl">
+            {isDailyMode ? "Daily" : "Practice"}{" "}
+            <span className="text-cc-green">vs Stockfish</span>
           </h1>
           <div className="ml-auto flex items-center gap-2">
             {isDailyMode && (
-              <span className="font-body text-xs text-primary border border-primary/40 rounded-full px-3 py-1">
+              <span className="rounded-full border border-cc-green/50 px-3 py-1 font-body text-xs text-cc-green">
                 24h / move
               </span>
             )}
-            <span className="font-body text-xs text-muted-foreground border border-border rounded-full px-3 py-1">
+            <span className="rounded-full border border-cc-border px-3 py-1 font-body text-xs text-gray-400">
               {difficulty.label} (~{difficulty.rating})
             </span>
           </div>
         </div>
       </nav>
 
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left panel */}
-          <div className="lg:col-span-3 space-y-4 order-2 lg:order-1">
-            <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="font-display text-base font-semibold flex items-center gap-2">
-                  <Trophy className="w-4 h-4 text-foreground/80" />
-                  Practice Match
-                </h2>
-              </div>
-
-              {/* Stockfish (Black) */}
+      <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 py-6">
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
+          {/* Left element: opponent banner, board, and user banner stacked */}
+          <section className="order-1 flex flex-col items-center lg:col-span-8">
+            <div className="flex w-full max-w-[640px] flex-col gap-2">
+              {/* Top player banner (opponent) */}
               <div
-                className={`flex items-center gap-3 p-3 rounded-lg transition-all ${
-                  game.turn() === "b" && !gameOver
-                    ? "bg-secondary border border-border"
-                    : ""
+                className={`flex items-center justify-between gap-3 rounded-md border bg-cc-panel px-3 py-2 transition-colors ${
+                  opponentTurnActive ? "border-cc-green/60" : "border-cc-border"
                 }`}
               >
-                <div className="w-9 h-9 rounded-md bg-secondary flex items-center justify-center">
-                  <Bot className="w-4 h-4 text-muted-foreground" />
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-black/30">
+                    <Bot className="h-5 w-5 text-gray-300" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate font-body text-sm font-semibold text-gray-100">
+                      {opponentName}{" "}
+                      <span className="font-normal text-gray-400">({opponentRating})</span>
+                    </p>
+                    <p className="font-body text-xs text-gray-500">{engineLabel}</p>
+                  </div>
+                  {engineThinking && (
+                    <Loader2 className="h-4 w-4 animate-spin text-cc-green" />
+                  )}
                 </div>
-                <div>
-                  <p className="font-body text-sm font-semibold text-foreground">
-                    Stockfish
-                  </p>
-                  <p className="font-body text-xs text-muted-foreground">
-                    {engineLabel}  -  {difficulty.label}
-                  </p>
-                </div>
-                {engineThinking && (
-                  <Loader2 className="w-4 h-4 animate-spin text-foreground/80 ml-auto" />
-                )}
-              </div>
-
-              <div className="h-px bg-border" />
-
-              {/* Player (White) */}
-              <div
-                className={`flex items-center gap-3 p-3 rounded-lg transition-all ${
-                  game.turn() === "w" && !gameOver
-                    ? "bg-secondary border border-border"
-                    : ""
-                }`}
-              >
-                <div className="w-9 h-9 rounded-md bg-primary flex items-center justify-center">
-                  <User className="w-4 h-4 text-primary-foreground" />
-                </div>
-                <div>
-                  <p className="font-body text-sm font-semibold text-foreground">
-                    You
-                  </p>
-                  <p className="font-body text-xs text-muted-foreground">White</p>
+                {/* Opponent countdown clock */}
+                <div
+                  className={`rounded px-3 py-1.5 font-mono text-lg font-semibold tabular-nums ${
+                    opponentTurnActive
+                      ? "bg-white text-cc-bg"
+                      : "bg-black/40 text-gray-400"
+                  }`}
+                >
+                  {opponentClockLabel}
                 </div>
               </div>
 
-              <div className="rounded-md border border-border bg-background p-3 space-y-1">
-                <p className="font-body text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Mode
-                </p>
-                <p className="font-body text-sm text-foreground">
-                  {isDailyMode ? "Daily Chess" : "Standard Practice"}
-                </p>
-                {isDailyMode && (
-                  <p className="font-mono text-xs text-muted-foreground">
-                    Time left this move: {formatDuration(dailyClockMs)}
-                  </p>
-                )}
-                <p className="font-body text-xs text-muted-foreground">
-                  Premove: {premoveEnabled ? "On" : "Off"}{" "}
-                  {queuedPremove ? `(queued ${queuedPremove.from}-${queuedPremove.to})` : ""}
-                </p>
-              </div>
-            </div>
-
-            <button
-              onClick={resetGame}
-              className="w-full py-3 bg-card hover:bg-secondary rounded-lg flex items-center justify-center gap-2 transition-colors border border-border font-body text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              New Game
-            </button>
-
-            <BoardThemeSelect />
-
-            {coach !== "none" && (
-              <div className="rounded-lg border border-border bg-card p-4 space-y-2">
-                <p className="font-display text-xs font-semibold text-foreground uppercase tracking-wider">
-                  Coach  -  {COACHES[coach].name}
-                </p>
-                <p className="font-body text-xs text-muted-foreground leading-relaxed min-h-[3rem]">
-                  {coachLine ||
-                    "Your philosopher-coach will comment after each of your moves. Play a move to begin."}
-                </p>
-                <p className="font-body text-[10px] text-muted-foreground/80">
-                  Add <span className="font-mono">?coach={coach}</span> to the URL to return to this guide.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Center - Board + Eval bar */}
-          <div className="lg:col-span-6 flex flex-col items-center order-1 lg:order-2">
-            <div className={`flex w-full max-w-[600px] ${showEvalBar ? "gap-2" : ""}`}>
+              {/* Eval bar + board row */}
+              <div className={`flex w-full ${showEvalBar ? "gap-2" : ""}`}>
               {/* Eval bar - hidden while a game is actively in progress. */}
               {showEvalBar && (
                 <div
                   data-testid="eval-bar"
-                  className="w-6 rounded-lg overflow-hidden border border-border bg-muted flex flex-col-reverse relative"
+                  className="relative flex w-6 flex-col-reverse overflow-hidden rounded-md border border-cc-border bg-black/40"
                 >
                   <motion.div
                     className="bg-ivory"
@@ -870,7 +970,7 @@ const Game = () => {
               )}
 
               {/* Board */}
-              <div className="flex-1 relative rounded-lg overflow-hidden border border-border shadow-elevated">
+              <div className="relative flex-1 overflow-hidden rounded-md border border-cc-border shadow-elevated">
                 <div
                   ref={boardRef}
                   className="grid grid-cols-8 grid-rows-8 aspect-square w-full"
@@ -1097,15 +1197,46 @@ const Game = () => {
               </div>
             </div>
 
-            {/* Turn indicator + nav */}
-            <div className="mt-4 flex gap-2 w-full justify-center max-w-[600px]">
-              <button
-                onClick={goBack}
-                className="p-3 bg-card rounded-lg hover:bg-secondary transition-colors border border-border"
+              {/* Bottom player banner (user) */}
+              <div
+                className={`flex items-center justify-between gap-3 rounded-md border bg-cc-panel px-3 py-2 transition-colors ${
+                  userTurnActive ? "border-cc-green/60" : "border-cc-border"
+                }`}
               >
-                <ChevronLeft className="w-4 h-4 text-muted-foreground" />
-              </button>
-              <div className="flex-1 flex items-center justify-center bg-card rounded-lg px-6 font-body text-sm font-medium border border-border text-foreground">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-cc-green/20">
+                    {profile?.avatar_url ? (
+                      <img
+                        src={profile.avatar_url}
+                        alt={userName}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <User className="h-5 w-5 text-cc-green" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate font-body text-sm font-semibold text-gray-100">
+                      {userName}{" "}
+                      <span className="font-normal text-gray-400">({userRating})</span>
+                    </p>
+                    <p className="font-body text-xs text-gray-500">White</p>
+                  </div>
+                </div>
+                {/* User countdown clock - high contrast when it is your move */}
+                <div
+                  className={`rounded px-3 py-1.5 font-mono text-lg font-semibold tabular-nums ${
+                    userTurnActive ? "bg-white text-cc-bg" : "bg-black/40 text-gray-400"
+                  }`}
+                >
+                  {userClockLabel}
+                </div>
+              </div>
+            </div>
+
+            {/* Live status + engine label */}
+            <div className="mt-3 w-full max-w-[640px] text-center">
+              <p className="font-body text-sm font-medium text-gray-200">
                 {gameOver
                   ? gameOver
                   : engineThinking
@@ -1116,108 +1247,302 @@ const Game = () => {
                     : "Your turn (White)"
                   : "Black to move"}
                 {game.inCheck() && !gameOver && (
-                  <span className="ml-2 text-destructive font-semibold">Check!</span>
+                  <span className="ml-2 font-semibold text-destructive">Check!</span>
                 )}
-              </div>
-              <button
-                onClick={goForward}
-                className="p-3 bg-card rounded-lg hover:bg-secondary transition-colors border border-border"
-              >
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-              </button>
-            </div>
-
-            {/* Engine label only - centipawn / depth / PV are intentionally not
-                surfaced while a game is actively being played. */}
-            <div className="mt-2 font-body text-xs text-muted-foreground text-center">
-              {engineLabel}
-              {showEvalBar && ` - Eval: ${evalDisplay}`}
-            </div>
-            {engineError && (
-              <p className="mt-2 max-w-md mx-auto text-center text-sm text-destructive font-body">
-                Engine failed to load: {engineError}
               </p>
-            )}
-          </div>
+              <p className="mt-1 font-body text-xs text-gray-500">
+                {engineLabel}
+                {showEvalBar && ` - Eval: ${evalDisplay}`}
+              </p>
+              {engineError && (
+                <p className="mt-2 font-body text-sm text-destructive">
+                  Engine failed to load: {engineError}
+                </p>
+              )}
+            </div>
+          </section>
 
-          {/* Right panel - Move history */}
-          <div className="lg:col-span-3 space-y-4 order-3">
-            <div className="rounded-lg border border-border bg-card p-5 flex flex-col">
-              <h3 className="font-display text-base font-semibold mb-4 flex items-center gap-2">
-                <History className="w-4 h-4 text-muted-foreground" />
-                Moves
-              </h3>
-              <div className="flex-1 overflow-y-auto max-h-[400px] pr-1 scrollbar-hide">
-                <div className="space-y-1">
-                  {Array.from({
-                    length: Math.ceil(moveHistory.length / 2),
-                  }).map((_, i) => {
-                    const whiteMove = moveHistory[i * 2];
-                    const blackMove = moveHistory[i * 2 + 1];
-                    return (
-                      <div key={i} className="flex items-center gap-1 text-sm">
-                        <span className="font-mono text-xs text-muted-foreground w-6 text-right shrink-0">
-                          {i + 1}.
-                        </span>
-                        <button
-                          onClick={() => goToMove(i * 2)}
-                          className={`px-2 py-1 rounded font-body text-sm transition-colors w-16 text-center ${
-                            historyIndex === i * 2
-                              ? "bg-foreground/15 text-foreground"
-                              : `hover:bg-secondary ${whiteMove?.rating?.label ? reviewTone(whiteMove.rating.label).text : "text-foreground"}`
-                          }`}
-                        >
-                          {whiteMove?.san}
-                        </button>
-                        {whiteMove?.rating?.label && (
-                          <span
-                            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${reviewTone(
-                              whiteMove.rating.label
-                            ).chip}`}
-                          >
-                            {whiteMove.rating.label}
-                          </span>
-                        )}
-                        {blackMove && (
-                          <>
-                            <button
-                              onClick={() => goToMove(i * 2 + 1)}
-                              className={`px-2 py-1 rounded font-body text-sm transition-colors w-16 text-center ${
-                                historyIndex === i * 2 + 1
-                                  ? "bg-foreground/15 text-foreground"
-                                  : `hover:bg-secondary ${blackMove?.rating?.label ? reviewTone(blackMove.rating.label).text : "text-foreground"}`
-                              }`}
-                            >
-                              {blackMove.san}
-                            </button>
-                            {blackMove.rating?.label && (
-                              <span
-                                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${reviewTone(
-                                  blackMove.rating.label
-                                ).chip}`}
-                              >
-                                {blackMove.rating.label}
-                              </span>
-                            )}
-                          </>
-                        )}
+          {/* Right element: sidebar panel (tabs + content + controls) */}
+          <aside className="order-2 lg:col-span-4">
+            <div className="flex h-full flex-col overflow-hidden rounded-lg border border-cc-border bg-cc-panel lg:max-h-[calc(100vh-7rem)]">
+              {/* Header tabs */}
+              <div className="flex border-b border-cc-border">
+                {(
+                  [
+                    { id: "moves", label: "Moves", icon: ListOrdered },
+                    { id: "players", label: "Players", icon: Users },
+                    { id: "chat", label: "Chat", icon: MessageSquare },
+                  ] as const
+                ).map((tab) => {
+                  const isActive = sidebarTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setSidebarTab(tab.id)}
+                      className={`relative flex flex-1 items-center justify-center gap-2 py-3 font-body text-sm font-medium transition-colors ${
+                        isActive
+                          ? "text-gray-100"
+                          : "text-gray-500 hover:text-gray-300"
+                      }`}
+                    >
+                      <tab.icon className="h-4 w-4" />
+                      {tab.label}
+                      {/* Active tab underline highlight */}
+                      {isActive && (
+                        <span className="absolute inset-x-0 bottom-0 h-0.5 bg-cc-green" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Tab content */}
+              <div className="flex min-h-[280px] flex-1 flex-col overflow-hidden">
+                {/* MOVES tab: scrollable move log laid out as a turn grid */}
+                {sidebarTab === "moves" && (
+                  <div className="flex-1 overflow-y-auto scrollbar-hide">
+                    {moveHistory.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-16 text-gray-500">
+                        <History className="h-8 w-8 opacity-40" />
+                        <p className="font-body text-sm">No moves yet</p>
+                        <p className="font-body text-xs">
+                          Click or drag a piece to move!
+                        </p>
                       </div>
-                    );
-                  })}
-                </div>
-                {moveHistory.length === 0 && (
-                  <div className="flex flex-col items-center justify-center text-muted-foreground space-y-2 py-12">
-                    <History className="w-8 h-8 opacity-40" />
-                    <p className="text-sm font-body">No moves yet</p>
-                    <p className="text-xs font-body">Click or drag a piece to move!</p>
+                    ) : (
+                      Array.from({
+                        length: Math.ceil(moveHistory.length / 2),
+                      }).map((_, i) => {
+                        const whiteMove = moveHistory[i * 2];
+                        const blackMove = moveHistory[i * 2 + 1];
+                        return (
+                          <div
+                            key={i}
+                            className={`grid grid-cols-[2.75rem_1fr_1fr] items-stretch ${
+                              i % 2 === 0 ? "bg-black/10" : ""
+                            }`}
+                          >
+                            <div className="flex items-center justify-center py-2 font-mono text-xs text-gray-500">
+                              {i + 1}.
+                            </div>
+                            {renderMoveCell(whiteMove, i * 2)}
+                            {renderMoveCell(blackMove, i * 2 + 1)}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+
+                {/* PLAYERS tab: summaries + game controls preserved from old panel */}
+                {sidebarTab === "players" && (
+                  <div className="flex-1 space-y-4 overflow-y-auto p-4 scrollbar-hide">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-3 rounded-md border border-cc-border bg-black/20 p-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-black/30">
+                          <Bot className="h-5 w-5 text-gray-300" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate font-body text-sm font-semibold text-gray-100">
+                            {opponentName}{" "}
+                            <span className="font-normal text-gray-400">
+                              ({opponentRating})
+                            </span>
+                          </p>
+                          <p className="font-body text-xs text-gray-500">
+                            {engineLabel} - {difficulty.label}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 rounded-md border border-cc-border bg-black/20 p-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-cc-green/20">
+                          {profile?.avatar_url ? (
+                            <img
+                              src={profile.avatar_url}
+                              alt={userName}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <User className="h-5 w-5 text-cc-green" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate font-body text-sm font-semibold text-gray-100">
+                            {userName}{" "}
+                            <span className="font-normal text-gray-400">
+                              ({userRating})
+                            </span>
+                          </p>
+                          <p className="font-body text-xs text-gray-500">White</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={resetGame}
+                      className="flex w-full items-center justify-center gap-2 rounded-md border border-cc-border bg-black/20 py-3 font-body text-xs font-semibold uppercase tracking-wider text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      New Game
+                    </button>
+
+                    <BoardThemeSelect />
+
+                    {coach !== "none" && (
+                      <div className="space-y-2 rounded-md border border-cc-border bg-black/20 p-4">
+                        <p className="font-display text-xs font-semibold uppercase tracking-wider text-gray-100">
+                          Coach - {COACHES[coach].name}
+                        </p>
+                        <p className="min-h-[3rem] font-body text-xs leading-relaxed text-gray-400">
+                          {coachLine ||
+                            "Your philosopher-coach will comment after each of your moves. Play a move to begin."}
+                        </p>
+                        <p className="font-body text-[10px] text-gray-500">
+                          Add{" "}
+                          <span className="font-mono">?coach={coach}</span> to the
+                          URL to return to this guide.
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="space-y-1 rounded-md border border-cc-border bg-black/20 p-3">
+                      <p className="font-body text-[11px] uppercase tracking-wider text-gray-500">
+                        Mode
+                      </p>
+                      <p className="font-body text-sm text-gray-200">
+                        {isDailyMode ? "Daily Chess" : "Standard Practice"}
+                      </p>
+                      {isDailyMode && (
+                        <p className="font-mono text-xs text-gray-400">
+                          Time left this move: {formatDuration(dailyClockMs)}
+                        </p>
+                      )}
+                      <p className="font-body text-xs text-gray-400">
+                        Premove: {premoveEnabled ? "On" : "Off"}{" "}
+                        {queuedPremove
+                          ? `(queued ${queuedPremove.from}-${queuedPremove.to})`
+                          : ""}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* CHAT tab */}
+                {sidebarTab === "chat" && (
+                  <div className="flex flex-1 flex-col overflow-hidden">
+                    <div className="flex-1 space-y-2 overflow-y-auto p-4 scrollbar-hide">
+                      {chatMessages.length === 0 ? (
+                        <p className="py-8 text-center font-body text-sm text-gray-500">
+                          No messages yet. Say hello!
+                        </p>
+                      ) : (
+                        chatMessages.map((m) => (
+                          <div key={m.id} className="font-body text-sm">
+                            <span className="font-semibold text-cc-green">
+                              {m.author}:{" "}
+                            </span>
+                            <span className="text-gray-200">{m.text}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        sendChat();
+                      }}
+                      className="flex items-center gap-2 border-t border-cc-border p-3"
+                    >
+                      <input
+                        value={chatDraft}
+                        onChange={(e) => setChatDraft(e.target.value)}
+                        placeholder="Send a message"
+                        className="flex-1 rounded-md border border-cc-border bg-black/30 px-3 py-2 font-body text-sm text-gray-100 placeholder:text-gray-600 focus:border-cc-green focus:outline-none"
+                      />
+                      <button
+                        type="submit"
+                        aria-label="Send message"
+                        className="rounded-md bg-cc-green p-2 text-white transition-colors hover:bg-cc-green-dark"
+                      >
+                        <Send className="h-4 w-4" />
+                      </button>
+                    </form>
                   </div>
                 )}
               </div>
 
+              {/* Footer control bar */}
+              <div className="space-y-2 border-t border-cc-border p-3">
+                {/* History navigation utilities */}
+                <div className="grid grid-cols-4 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={goToStart}
+                    disabled={currentPly === 0}
+                    aria-label="First move"
+                    title="First move"
+                    className="flex items-center justify-center rounded-md border border-cc-border bg-black/20 py-2.5 text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronFirst className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goBack}
+                    disabled={currentPly === 0}
+                    aria-label="Previous move"
+                    title="Previous move"
+                    className="flex items-center justify-center rounded-md border border-cc-border bg-black/20 py-2.5 text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goForward}
+                    disabled={currentPly >= totalPlies}
+                    aria-label="Next move"
+                    title="Next move"
+                    className="flex items-center justify-center rounded-md border border-cc-border bg-black/20 py-2.5 text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goToLast}
+                    disabled={currentPly >= totalPlies}
+                    aria-label="Last move"
+                    title="Last move"
+                    className="flex items-center justify-center rounded-md border border-cc-border bg-black/20 py-2.5 text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronLast className="h-4 w-4" />
+                  </button>
+                </div>
+                {/* Major game actions */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleOfferDraw}
+                    disabled={!!gameOver}
+                    className="flex items-center justify-center gap-2 rounded-md border border-cc-border bg-black/20 py-2.5 font-body text-sm font-medium text-gray-200 transition-colors hover:bg-black/40 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Handshake className="h-4 w-4" />
+                    Offer Draw
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResign}
+                    disabled={!!gameOver}
+                    className="flex items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 py-2.5 font-body text-sm font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Flag className="h-4 w-4" />
+                    Resign
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          </aside>
         </div>
-      </div>
+      </main>
     </div>
   );
 };
