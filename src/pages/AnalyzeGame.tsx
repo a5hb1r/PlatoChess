@@ -30,6 +30,7 @@ import {
   type ReviewedPly,
 } from "@/lib/game-review";
 import { reviewTone } from "@/lib/review-colors";
+import { buildEvaluationPhases, summarizeMoveClassifications } from "@/lib/analysis-summary";
 import { StockfishEngine, STOCKFISH_VERSION_LABEL, type StockfishInfo, formatEngineInitError } from "@/lib/stockfish";
 import { buildGameReviewReport } from "@/lib/review-builder";
 import { buildOpeningSuite, lineToFen, openingLinePreview, type OpeningSuiteData, type OpeningTheoryNode } from "@/lib/opening-suite";
@@ -176,6 +177,9 @@ export default function AnalyzeGame() {
     }
     return { wPoints: wPoints.join(" "), bPoints: bPoints.join(" ") };
   }, [moves]);
+
+  const classifications = useMemo(() => summarizeMoveClassifications(moves), [moves]);
+  const evaluationPhases = useMemo(() => buildEvaluationPhases(moves), [moves]);
 
   const jumpCritical = useCallback(
     (direction: 1 | -1) => {
@@ -502,6 +506,85 @@ export default function AnalyzeGame() {
                 <polyline points={trend.bPoints} fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+            <p className="font-display text-sm font-semibold flex items-center gap-2">
+              <Gauge className="w-4 h-4" />
+              Evaluation Bar Timeline
+            </p>
+            <div className="space-y-2">
+              {evaluationPhases.map((phase) => {
+                const tone =
+                  !phase.present
+                    ? "text-muted-foreground"
+                    : phase.evalText.includes("M") && !phase.evalText.startsWith("-")
+                    ? "text-[#22c55e]"
+                    : phase.evalText.startsWith("-")
+                    ? "text-[#dc2626]"
+                    : phase.evalCp >= 50
+                    ? "text-foreground"
+                    : phase.evalCp <= -50
+                    ? "text-[#f97316]"
+                    : "text-muted-foreground";
+                return (
+                  <div
+                    key={phase.name}
+                    className="rounded-md border border-border bg-background px-2.5 py-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                        {phase.name}
+                      </span>
+                      <span className={`font-mono text-sm font-semibold ${tone}`}>{phase.evalText}</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{phase.note}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+            <p className="font-display text-sm font-semibold flex items-center gap-2">
+              <Target className="w-4 h-4" />
+              Move Classification Summary
+            </p>
+            <div className="space-y-1">
+              {classifications.map((row) => {
+                const tone = reviewTone(row.label);
+                const dimmed = row.total === 0;
+                return (
+                  <div
+                    key={row.label}
+                    className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 ${tone.row} ${
+                      dimmed ? "border-transparent opacity-50" : "border-transparent bg-background/60"
+                    }`}
+                    style={{ borderLeftWidth: 4 }}
+                    title={row.impact}
+                  >
+                    <span className="text-sm leading-none">{row.icon}</span>
+                    <span className={`text-xs font-medium ${tone.text}`}>
+                      {row.title}
+                      {row.symbol ? <span className="text-muted-foreground"> ({row.symbol})</span> : null}
+                    </span>
+                    <span className="ml-auto flex items-center gap-2">
+                      {row.total > 0 && (
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {row.white}W/{row.black}B
+                        </span>
+                      )}
+                      <span className={`text-sm font-mono font-bold ${dimmed ? "text-muted-foreground" : tone.text}`}>
+                        {row.total}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Counts reflect this game's level-dependent classification thresholds.
+            </p>
           </div>
 
           <div className="rounded-lg border border-border bg-card p-4">
