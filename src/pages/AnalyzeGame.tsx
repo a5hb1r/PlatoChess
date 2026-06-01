@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   BookOpenCheck,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Filter,
   Gauge,
+  Lightbulb,
   Loader2,
   Menu,
   Play,
@@ -15,9 +17,12 @@ import {
   Sparkles,
   Swords,
   Target,
+  XCircle,
 } from "lucide-react";
-import { Chess, Square } from "chess.js";
+import { Chess, Square, PieceSymbol } from "chess.js";
 import { PIECE_URLS } from "@/lib/chess-constants";
+import { MoveGlyph, isMistakeLabel } from "@/components/chess/MoveGlyph";
+import { playMoveSound } from "@/lib/sounds";
 import {
   consumeAnalysisTransitionMs,
   loadLatestFinishedGame,
@@ -124,12 +129,35 @@ export default function AnalyzeGame() {
   const [buildingPuzzles, setBuildingPuzzles] = useState(false);
   const [personalizedPuzzleCount, setPersonalizedPuzzleCount] = useState(() => loadPersonalizedPuzzles().length);
 
+  // --- "Retry This Move" challenge state ---
+  const [retryMode, setRetryMode] = useState(false);
+  const [retryGame, setRetryGame] = useState<Chess | null>(null);
+  const [retrySel, setRetrySel] = useState<Square | null>(null);
+  const [retryTargets, setRetryTargets] = useState<Square[]>([]);
+  const [retryFeedback, setRetryFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [retrySolved, setRetrySolved] = useState(false);
+
   const moves = useMemo(() => report?.moves ?? [], [report]);
   const boundedPly = Math.max(0, Math.min(selectedPly, moves.length));
   const current: ReviewedPly | null = boundedPly > 0 ? moves[boundedPly - 1] : null;
   const boardFen = current?.fenAfter ?? new Chess().fen();
   const renderedFen = previewFen ?? boardFen;
-  const display = useMemo(() => new Chess(renderedFen), [renderedFen]);
+  // While retrying, the board shows the position *before* the error so the
+  // player can hunt for the engine's best move.
+  const boardRenderFen = retryMode && retryGame ? retryGame.fen() : renderedFen;
+  const display = useMemo(() => new Chess(boardRenderFen), [boardRenderFen]);
+
+  // Per-side classification tallies for the Coach's Breakdown summary.
+  const breakdown = useMemo(() => {
+    const make = () => ({ Brilliant: 0, Great: 0, Best: 0, Excellent: 0, Good: 0, Inaccuracy: 0, Miss: 0, Mistake: 0, Blunder: 0 } as Record<string, number>);
+    const w = make();
+    const b = make();
+    for (const m of moves) {
+      const target = m.side === "w" ? w : b;
+      if (target[m.label] !== undefined) target[m.label] += 1;
+    }
+    return { w, b };
+  }, [moves]);
   const best = previewFen ? null : parseUci(current?.bestUci);
   const played = previewFen ? null : parseUci(current?.playedUci);
 
@@ -215,6 +243,16 @@ export default function AnalyzeGame() {
   useEffect(() => {
     setTransitionMs(consumeAnalysisTransitionMs());
   }, []);
+
+  // Leaving the current ply abandons any in-progress retry.
+  useEffect(() => {
+    setRetryMode(false);
+    setRetryGame(null);
+    setRetrySel(null);
+    setRetryTargets([]);
+    setRetryFeedback(null);
+    setRetrySolved(false);
+  }, [boundedPly]);
 
   useEffect(() => {
     const engine = new StockfishEngine();
@@ -417,6 +455,95 @@ export default function AnalyzeGame() {
     [openingFen]
   );
 
+  // SAN for a UCI move applied to a FEN (used to name the engine's best move).
+  const bestSan = useMemo(() => {
+    if (!current?.bestUci) return null;
+    try {
+      const g = new Chess(current.fenBefore);
+      const m = g.move({
+        from: current.bestUci.slice(0, 2) as Square,
+        to: current.bestUci.slice(2, 4) as Square,
+        promotion: (current.bestUci[4] as PieceSymbol) || undefined,
+      });
+      return m?.san ?? null;
+    } catch {
+      return null;
+    }
+  }, [current]);
+
+  const startRetry = useCallback(() => {
+    if (!current) return;
+    setRetryGame(new Chess(current.fenBefore));
+    setRetryMode(true);
+    setRetrySel(null);
+    setRetryTargets([]);
+    setRetryFeedback(null);
+    setRetrySolved(false);
+    setPreviewFen(null);
+  }, [current]);
+
+  const exitRetry = useCallback(() => {
+    setRetryMode(false);
+    setRetryGame(null);
+    setRetrySel(null);
+    setRetryTargets([]);
+    setRetryFeedback(null);
+    setRetrySolved(false);
+  }, []);
+
+  const attemptRetryMove = useCallback(
+    (from: Square, to: Square) => {
+      if (!current || !retryGame) return;
+      const g = new Chess(retryGame.fen());
+      const mover = g.get(from);
+      const isPromo = mover?.type === "p" && (to[1] === "8" || to[1] === "1");
+      const move = g.move({ from, to, promotion: isPromo ? "q" : undefined });
+      if (!move) return;
+
+      const uci = `${from}${to}${isPromo ? "q" : ""}`;
+      const correct = !!current.bestUci && uci === current.bestUci;
+      playMoveSound(move, g.isCheck());
+      setRetrySel(null);
+      setRetryTargets([]);
+
+      if (correct) {
+        setRetryGame(g);
+        setRetrySolved(true);
+        setRetryFeedback({ ok: true, msg: `Correct — ${move.san} is the engine's top move here.` });
+      } else {
+        setRetryFeedback({
+          ok: false,
+          msg: bestSan
+            ? `${move.san} isn't best. The engine prefers ${bestSan}. Try again.`
+            : `${move.san} isn't the engine's choice. Try again.`,
+        });
+        // Reset back to the puzzle position for another attempt.
+        setRetryGame(new Chess(current.fenBefore));
+      }
+    },
+    [current, retryGame, bestSan]
+  );
+
+  const onRetrySquare = useCallback(
+    (sq: Square) => {
+      if (!retryMode || !retryGame || retrySolved || !current) return;
+      if (retryGame.turn() !== current.side) return;
+      if (retrySel && retryTargets.includes(sq)) {
+        attemptRetryMove(retrySel, sq);
+        return;
+      }
+      const piece = retryGame.get(sq);
+      if (piece && piece.color === retryGame.turn()) {
+        setRetrySel(sq);
+        setRetryTargets(retryGame.moves({ square: sq, verbose: true }).map((m) => m.to as Square));
+      } else {
+        setRetrySel(null);
+        setRetryTargets([]);
+      }
+    },
+    [retryMode, retryGame, retrySolved, current, retrySel, retryTargets, attemptRetryMove]
+  );
+
   if (!report && !reviewing) {
     return (
       <div className="min-h-screen bg-background">
@@ -504,6 +631,35 @@ export default function AnalyzeGame() {
             </div>
           </div>
 
+          <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+            <p className="font-display text-sm font-semibold">Coach's Breakdown</p>
+            <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1.5">
+              <span />
+              <span className="text-center text-[10px] font-semibold uppercase text-muted-foreground">You</span>
+              <span className="text-center text-[10px] font-semibold uppercase text-muted-foreground">Bot</span>
+              {["Brilliant", "Great", "Best", "Excellent", "Good", "Inaccuracy", "Miss", "Mistake", "Blunder"].map((label) => (
+                <Fragment key={label}>
+                  <span className="flex items-center gap-1.5 text-xs">
+                    <MoveGlyph label={label} size={15} />
+                    <span className="text-foreground/85">{label}</span>
+                  </span>
+                  <span className={`text-center font-mono text-sm ${breakdown.w[label] ? "text-foreground" : "text-muted-foreground/40"}`}>
+                    {breakdown.w[label]}
+                  </span>
+                  <span className={`text-center font-mono text-sm ${breakdown.b[label] ? "text-foreground" : "text-muted-foreground/40"}`}>
+                    {breakdown.b[label]}
+                  </span>
+                </Fragment>
+              ))}
+            </div>
+            <div className="flex items-center justify-between rounded-md border border-border bg-background px-2.5 py-1.5 text-xs">
+              <span className="text-muted-foreground">Accuracy</span>
+              <span className="font-mono">
+                You {report!.accuracy.w.toFixed(1)}% · Bot {report!.accuracy.b.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+
           <div className="rounded-lg border border-border bg-card p-4">
             <label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-2 mb-2">
               <Filter className="w-3 h-3" />
@@ -578,29 +734,56 @@ export default function AnalyzeGame() {
                 const sq = `${String.fromCharCode(97 + col)}${8 - row}` as Square;
                 const isDark = (row + col) % 2 === 1;
                 const piece = display.get(sq);
+                const isRetrySel = retryMode && retrySel === sq;
+                const isRetryTarget = retryMode && retryTargets.includes(sq);
                 return (
-                  <div key={sq} className={`relative ${isDark ? "bg-chess-dark" : "bg-chess-light"}`}>
+                  <div
+                    key={sq}
+                    onClick={() => onRetrySquare(sq)}
+                    className={`relative ${isDark ? "bg-chess-dark" : "bg-chess-light"} ${
+                      retryMode && !retrySolved ? "cursor-pointer" : ""
+                    }`}
+                  >
+                    {isRetrySel && (
+                      <div className="absolute inset-0 z-10" style={{ backgroundColor: "rgba(245,200,68,0.45)" }} />
+                    )}
                     {piece && (
                       <img
                         src={PIECE_URLS[piece.color][piece.type]}
                         alt=""
-                        className="w-[82%] h-[82%] object-contain absolute inset-0 m-auto pointer-events-none"
+                        className="w-[82%] h-[82%] object-contain absolute inset-0 m-auto pointer-events-none drop-shadow-[0_2px_3px_rgba(0,0,0,0.35)]"
                         draggable={false}
                       />
+                    )}
+                    {isRetryTarget && (
+                      <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+                        {piece ? (
+                          <div className="h-[84%] w-[84%] rounded-full border-[5px]" style={{ borderColor: "rgba(129,182,76,0.55)" }} />
+                        ) : (
+                          <div className="h-[30%] w-[30%] rounded-full" style={{ backgroundColor: "rgba(129,182,76,0.5)" }} />
+                        )}
+                      </div>
                     )}
                   </div>
                 );
               })}
             </div>
-            <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-              <defs>
-                <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                  <polygon points="0 0, 6 3, 0 6" fill="currentColor" />
-                </marker>
-              </defs>
-              <g style={{ color: "#7dd3fc" }}>{arrowLine(best, "currentColor")}</g>
-              <g style={{ color: "#f87171" }}>{arrowLine(played, "currentColor")}</g>
-            </svg>
+            {!retryMode && (
+              <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <defs>
+                  <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                    <polygon points="0 0, 6 3, 0 6" fill="currentColor" />
+                  </marker>
+                </defs>
+                <g style={{ color: "#7dd3fc" }}>{arrowLine(best, "currentColor")}</g>
+                <g style={{ color: "#f87171" }}>{arrowLine(played, "currentColor")}</g>
+              </svg>
+            )}
+            {retryMode && (
+              <div className="pointer-events-none absolute left-2 top-2 z-40 rounded-md bg-background/85 px-2 py-1 text-[11px] font-semibold text-foreground backdrop-blur-sm">
+                Retry mode · {current?.side === "w" ? "White" : "Black"} to move
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -646,6 +829,63 @@ export default function AnalyzeGame() {
             </button>
           </div>
 
+          {current && isMistakeLabel(current.label) && (
+            <div className="rounded-lg border border-glyph-mistake/40 bg-card p-3">
+              {!retryMode ? (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary">
+                      <Lightbulb className="h-4 w-4 text-foreground/80" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">You played a {current.label} here</p>
+                      <p className="text-[11px] text-muted-foreground">Hide the game line and find the engine's best move yourself.</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={startRetry}
+                    className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
+                  >
+                    Retry This Move
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-foreground">
+                      Find the best move for {current.side === "w" ? "White" : "Black"}
+                    </p>
+                    <button onClick={exitRetry} className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                      Exit retry
+                    </button>
+                  </div>
+                  {retryFeedback ? (
+                    <div
+                      className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                        retryFeedback.ok
+                          ? "border-glyph-best/50 bg-glyph-best/10 text-glyph-best"
+                          : "border-glyph-mistake/50 bg-glyph-mistake/10 text-glyph-mistake"
+                      }`}
+                    >
+                      {retryFeedback.ok ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                      <span>{retryFeedback.msg}</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Click a piece, then its destination square.</p>
+                  )}
+                  {retrySolved && (
+                    <button
+                      onClick={exitRetry}
+                      className="w-full rounded-md border border-border py-2 text-xs font-semibold text-foreground transition-colors hover:bg-secondary"
+                    >
+                      Back to review
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <p className="text-xs text-muted-foreground">
             Blue arrow = best engine move, red arrow = played move. Live evaluation updates during scrubbing.
           </p>
@@ -684,8 +924,9 @@ export default function AnalyzeGame() {
                     <span className={`font-mono text-xs ${reviewTone(m.label).text}`}>
                       {m.ply}. {m.san}
                     </span>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${reviewTone(m.label).chip}`}>
-                      {m.label}
+                    <span className="flex items-center gap-1.5">
+                      <span className={`text-[10px] font-semibold ${reviewTone(m.label).text}`}>{m.label}</span>
+                      <MoveGlyph label={m.label} size={16} />
                     </span>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-0.5">

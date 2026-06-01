@@ -81,8 +81,32 @@ export function rateMoveLikeChessCom(
   const isCapture = playedMove.san.includes("x");
   const isSacrifice = !isCapture && /[QRBN]/.test(playedMove.san) && cpLoss <= 24;
 
+  // Eval from the moving side's point of view (positive = good for the mover).
+  const beforeForSide = side === "w" ? beforeCp : -beforeCp;
+  const afterForSide = side === "w" ? afterCp : -afterCp;
+  const beforeMateForSide =
+    beforeProbe.mate !== undefined && beforeProbe.mate !== 0
+      ? side === "w"
+        ? beforeProbe.mate
+        : -beforeProbe.mate
+      : undefined;
+
   if ((isSacrifice || (isCheck && cpLoss <= 20)) && cpLoss <= 24) {
-    return { label: "Brilliant", color: "text-foreground font-semibold", cpLoss, bestMove: bestMoveUci };
+    return { label: "Brilliant", color: "text-[#14b8a6] font-semibold", cpLoss, bestMove: bestMoveUci };
+  }
+  // Missed win: the side was clearly winning (or had a forced mate) and let
+  // most of that advantage slip. Flagged distinctly from a plain mistake.
+  if (
+    cpLoss >= 130 &&
+    ((beforeForSide >= 250 && afterForSide < 120) ||
+      (beforeMateForSide !== undefined && beforeMateForSide > 0))
+  ) {
+    return { label: "Miss", color: "text-[#f97316]", cpLoss, bestMove: bestMoveUci };
+  }
+  // Great: the precise, often only move that holds a difficult or worse
+  // position together (matches the engine's top choice while under pressure).
+  if (isBest && beforeForSide <= -40 && cpLoss <= 15) {
+    return { label: "Great", color: "text-[#1d4ed8]", cpLoss, bestMove: bestMoveUci };
   }
   if (isBest || cpLoss <= 10) {
     return { label: "Best", color: "text-foreground", cpLoss, bestMove: bestMoveUci };
