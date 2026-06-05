@@ -31,6 +31,7 @@ import { reviewTone } from "@/lib/review-colors";
 import {
   saveLatestFinishedGame,
 } from "@/lib/game-review";
+import { describeGameTermination } from "@/lib/game-termination";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -137,6 +138,7 @@ const Game = () => {
     to: Square;
   } | null>(null);
   const [premoveEnabled, setPremoveEnabled] = useState(true);
+  const [playerElo, setPlayerElo] = useState<number | undefined>(undefined);
   const [queuedPremove, setQueuedPremove] = useState<QueuedPremove | null>(null);
   const [dailyMoveDeadlineMs, setDailyMoveDeadlineMs] = useState<number | null>(
     isDailyMode ? Date.now() + DAILY_MOVE_WINDOW_MS : null
@@ -187,13 +189,14 @@ const Game = () => {
 
     supabase
       .from("profiles")
-      .select("premove_enabled")
+      .select("premove_enabled, rating")
       .eq("user_id", user.id)
       .maybeSingle()
       .then(({ data }) => {
         const enabled = data?.premove_enabled ?? true;
         setPremoveEnabled(enabled);
         localStorage.setItem(PREMOVE_STORAGE_KEY, JSON.stringify(enabled));
+        if (typeof data?.rating === "number") setPlayerElo(data.rating);
       });
   }, [user]);
 
@@ -267,11 +270,12 @@ const Game = () => {
     return () => engine.destroy();
   }, [difficulty.skill]);
 
-  // Keep eval updates active in practice mode (visible eval bar), and also when
-  // coach/review requires it in other modes.
+  // Eval is computed for the coach, for board scrubbing, and once the game has
+  // concluded (so the bar can be revealed). It is intentionally NOT surfaced to
+  // the user while a game is actively in progress (spec Section 1).
   const liveEvalNeeded = isPracticeMode || coach !== "none" || !!viewFen || !!gameOver;
   useEffect(() => {
-    if (!isPracticeMode || !liveEvalNeeded) return;
+    if (!liveEvalNeeded) return;
     if (!engineReady || !engineRef.current || engineError) return;
     const fen = viewFen || gameFen;
     const side = new Chess(fen).turn();
@@ -290,16 +294,11 @@ const Game = () => {
     });
   }, [gameFen, viewFen, engineReady, engineError, isPracticeMode, liveEvalNeeded]);
 
-  // Check game over
+  // Check game over (precise draw classification per spec Section 2).
   useEffect(() => {
-    if (game.isCheckmate()) {
-      setGameOver(game.turn() === "w" ? "Black wins by checkmate!" : "White wins by checkmate!");
-      ChessSounds.gameOver();
-    } else if (game.isDraw()) {
-      setGameOver("Draw!");
-      ChessSounds.gameOver();
-    } else if (game.isStalemate()) {
-      setGameOver("Stalemate!");
+    const termination = describeGameTermination(game);
+    if (termination.over && termination.message) {
+      setGameOver(termination.message);
       ChessSounds.gameOver();
     }
   }, [game]);
@@ -311,8 +310,10 @@ const Game = () => {
       pgn: game.pgn(),
       result: gameOver,
       engine: engineLabel,
+      playerElo,
+      playerColor: "w",
     });
-  }, [engineLabel, game, gameOver]);
+  }, [engineLabel, game, gameOver, playerElo]);
 
   // Stockfish plays black (use ref for position so this callback stays stable across white moves)
   const makeEngineMove = useCallback(async () => {
@@ -710,8 +711,9 @@ const Game = () => {
     };
   }, [gameOver, handleAnalyzeAction, handleNewOpponentAction, resetGame]);
 
-  // Practice mode keeps the eval bar visible; online/daily modes hide it.
-  const showEvalBar = isPracticeMode;
+  // The evaluation bar is strictly hidden during the active game across all modes
+  // and is only revealed once the game has completely concluded (spec Section 1).
+  const showEvalBar = !!gameOver;
   return (
     <div className="min-h-screen bg-background">
       {/* Nav */}

@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { calculatePvpEloChange, isRatedPvpGameType } from "./elo-rating";
+import {
+  calculatePvpEloChange,
+  constrainEloGain,
+  isRatedPvpGameType,
+  DIMINISHED_MAX_GAIN,
+  ELO_MAX_GAIN_PER_MATCH,
+} from "./elo-rating";
 
 const { rpcMock } = vi.hoisted(() => ({ rpcMock: vi.fn() }));
 
@@ -42,6 +48,51 @@ describe("elo-rating", () => {
 
     expect(upset.whiteDelta).toBeGreaterThan(16);
     expect(expectedWin.whiteDelta).toBeGreaterThan(-16);
+  });
+});
+
+describe("constrainEloGain (anti-farming)", () => {
+  it("passes losses through unchanged", () => {
+    expect(constrainEloGain(800, 1200, -24)).toBe(-24);
+  });
+
+  it("caps gains at the global per-match maximum", () => {
+    expect(constrainEloGain(800, 1600, 250)).toBe(ELO_MAX_GAIN_PER_MATCH);
+  });
+
+  it("applies diminishing returns when far higher-rated (700 vs 400)", () => {
+    expect(constrainEloGain(700, 400, 5)).toBe(DIMINISHED_MAX_GAIN);
+  });
+
+  it("yields zero against a sub-tier opponent when above the protection tier", () => {
+    expect(constrainEloGain(800, 100, 12)).toBe(0);
+    expect(constrainEloGain(201, 100, 12)).toBe(0);
+  });
+
+  it("keeps standard rules for protected players at or below 200 Elo", () => {
+    // 150-rated player beating a 90-rated opponent still earns their full gain.
+    expect(constrainEloGain(150, 90, 18)).toBe(18);
+    expect(constrainEloGain(200, 90, 18)).toBe(18);
+  });
+});
+
+describe("calculatePvpEloChange anti-farming integration", () => {
+  it("limits a 700 player beating a 400 player to +1 / -1", () => {
+    expect(
+      calculatePvpEloChange({ whiteRating: 700, blackRating: 400, result: "white_win" })
+    ).toEqual({ whiteDelta: DIMINISHED_MAX_GAIN, blackDelta: -DIMINISHED_MAX_GAIN });
+  });
+
+  it("awards zero when a player above 200 beats a sub-100 opponent", () => {
+    expect(
+      calculatePvpEloChange({ whiteRating: 800, blackRating: 90, result: "white_win" })
+    ).toEqual({ whiteDelta: 0, blackDelta: 0 });
+  });
+
+  it("preserves standard symmetric deltas for evenly matched players", () => {
+    expect(
+      calculatePvpEloChange({ whiteRating: 1200, blackRating: 1200, result: "white_win" })
+    ).toEqual({ whiteDelta: 16, blackDelta: -16 });
   });
 });
 

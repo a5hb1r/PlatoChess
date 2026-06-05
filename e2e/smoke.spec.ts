@@ -16,12 +16,13 @@ test.describe("smoke routes", () => {
     await expect(page.getByText(/vs stockfish/i)).toBeVisible();
   });
 
-  test("practice mode shows eval bar", async ({ page }) => {
+  test("practice mode hides eval bar during the active game", async ({ page }) => {
     await page.goto("/game?level=2&mode=practice");
-    await expect(page.getByTestId("eval-bar")).toBeVisible();
+    await expect(page.getByText(/vs stockfish/i)).toBeVisible();
+    await expect(page.getByTestId("eval-bar")).toHaveCount(0);
   });
 
-  test("online mode hides eval bar", async ({ page }) => {
+  test("online mode hides eval bar during the active game", async ({ page }) => {
     await page.goto("/game?level=2&mode=online");
     await expect(page.getByTestId("eval-bar")).toHaveCount(0);
   });
