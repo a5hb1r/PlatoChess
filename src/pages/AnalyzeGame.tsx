@@ -33,6 +33,7 @@ import {
   type ReviewedPly,
 } from "@/lib/game-review";
 import { reviewTone } from "@/lib/review-colors";
+import { buildEvaluationPhases, summarizeMoveClassifications } from "@/lib/analysis-summary";
 import { StockfishEngine, STOCKFISH_VERSION_LABEL, type StockfishInfo, formatEngineInitError } from "@/lib/stockfish";
 import { buildGameReviewReport } from "@/lib/review-builder";
 import { buildOpeningSuite, lineToFen, openingLinePreview, type OpeningSuiteData, type OpeningTheoryNode } from "@/lib/opening-suite";
@@ -187,6 +188,9 @@ export default function AnalyzeGame() {
     }
     return { wPoints: wPoints.join(" "), bPoints: bPoints.join(" ") };
   }, [moves]);
+
+  const classifications = useMemo(() => summarizeMoveClassifications(moves), [moves]);
+  const evaluationPhases = useMemo(() => buildEvaluationPhases(moves), [moves]);
 
   const jumpCritical = useCallback(
     (direction: 1 | -1) => {
