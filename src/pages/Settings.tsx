@@ -11,6 +11,7 @@ import {
   X,
   Shield,
   Trophy,
+  Palette,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,6 +21,8 @@ import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
+import { useTheme } from "@/contexts/ThemeContext";
+import type { BoardThemeId } from "@/lib/chess-themes";
 
 const PREMOVE_STORAGE_KEY = "plato:premove-enabled";
 const PREMOVE_QUEUE_STORAGE_KEY = "plato:queued-premove";
@@ -35,6 +38,15 @@ interface Profile {
 
 const Settings = () => {
   const { user, signOut, loading: authLoading } = useAuth();
+  const {
+    boardTheme,
+    setBoardTheme,
+    boardThemes,
+    soundEnabled,
+    setSoundEnabled,
+    showValidMoves,
+    setShowValidMoves,
+  } = useTheme();
   const navigate = useNavigate();
   const [loadingPortal, setLoadingPortal] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -427,6 +439,73 @@ const Settings = () => {
                 <p className="font-body text-xs text-muted-foreground">
                   Current seek cap: {profile.max_active_games} active game{profile.max_active_games === 1 ? "" : "s"}.
                 </p>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="font-display text-lg font-semibold mb-4 flex items-center gap-2">
+              <Palette className="h-5 w-5 text-foreground/75" />
+              Board &amp; Interface
+            </h2>
+            <div className="rounded-lg border border-border bg-card p-6 space-y-6">
+              <div>
+                <p className="font-body text-sm font-semibold text-foreground mb-1">Board Theme</p>
+                <p className="font-body text-xs text-muted-foreground mb-3">
+                  Choose the square colors used across Play and Puzzles.
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {(Object.keys(boardThemes) as BoardThemeId[]).map((id) => {
+                    const theme = boardThemes[id];
+                    const active = boardTheme === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setBoardTheme(id)}
+                        className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${
+                          active
+                            ? "border-primary/60 bg-secondary"
+                            : "border-border hover:bg-secondary/60"
+                        }`}
+                      >
+                        <span className="flex h-6 w-6 shrink-0 overflow-hidden rounded-sm border border-border">
+                          <span className="h-full w-1/2" style={{ background: `hsl(${theme.chessLight})` }} />
+                          <span className="h-full w-1/2" style={{ background: `hsl(${theme.chessDark})` }} />
+                        </span>
+                        <span className="truncate font-body text-sm text-foreground">{theme.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="font-body text-sm font-semibold text-foreground">Sound Effects</p>
+                  <p className="font-body text-xs text-muted-foreground">
+                    Move, capture, and check audio cues.
+                  </p>
+                </div>
+                <Switch
+                  checked={soundEnabled}
+                  onCheckedChange={setSoundEnabled}
+                  aria-label="Toggle sound effects"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="font-body text-sm font-semibold text-foreground">Show Valid Moves</p>
+                  <p className="font-body text-xs text-muted-foreground">
+                    Highlight legal destinations when you select a piece.
+                  </p>
+                </div>
+                <Switch
+                  checked={showValidMoves}
+                  onCheckedChange={setShowValidMoves}
+                  aria-label="Toggle valid move indicators"
+                />
               </div>
             </div>
           </section>

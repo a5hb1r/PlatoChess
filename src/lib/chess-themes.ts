@@ -1,11 +1,30 @@
-/** Board + page accent presets (black & white family). Applied via `data-board-theme` on `<html>`. */
+/** Board + page accent presets. Applied via `data-board-theme` on `<html>`. */
 
-export type BoardThemeId = "classic" | "marble" | "graphite" | "zen" | "midnight";
+export type BoardThemeId =
+  | "green"
+  | "wood"
+  | "classic"
+  | "marble"
+  | "graphite"
+  | "zen"
+  | "midnight";
 
 export const BOARD_THEMES: Record<
   BoardThemeId,
   { label: string; chessLight: string; chessDark: string; description: string }
 > = {
+  green: {
+    label: "Green / White",
+    description: "Tournament green felt squares",
+    chessLight: "70 38% 90%",
+    chessDark: "92 28% 44%",
+  },
+  wood: {
+    label: "Wood",
+    description: "Warm walnut and maple board",
+    chessLight: "35 52% 80%",
+    chessDark: "26 42% 42%",
+  },
   classic: {
     label: "Classic",
     description: "Soft ivory and charcoal squares",
@@ -31,14 +50,14 @@ export const BOARD_THEMES: Record<
     chessDark: "0 0% 22%",
   },
   midnight: {
-    label: "Midnight",
+    label: "Dark Mode",
     description: "Dim board for night play",
     chessLight: "220 12% 38%",
     chessDark: "220 18% 14%",
   },
 };
 
-export const DEFAULT_BOARD_THEME: BoardThemeId = "classic";
+export const DEFAULT_BOARD_THEME: BoardThemeId = "green";
 
 export function isBoardThemeId(s: string): s is BoardThemeId {
   return s in BOARD_THEMES;
