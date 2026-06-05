@@ -38,6 +38,10 @@ export interface FinishedGameSnapshot {
   pgn: string;
   result: string;
   engine: string;
+  /** Player Elo at the time of the game, used to scale brilliancy detection (spec Section 3). */
+  playerElo?: number;
+  /** Which color the (human) player controlled. Defaults to White. */
+  playerColor?: Color;
 }
 
 export interface PersonalizedPuzzle {
@@ -50,6 +54,82 @@ export interface PersonalizedPuzzle {
   title: string;
   description: string;
   bestGapCp: number;
+}
+
+/** Move classifications in the fixed order used by the post-game report (spec Section 4). */
+export const MOVE_CLASSIFICATION_ORDER = [
+  "Brilliant",
+  "Great",
+  "Best",
+  "Excellent",
+  "Good",
+  "Inaccuracy",
+  "Mistake",
+  "Blunder",
+] as const;
+
+export type MoveClassification = (typeof MOVE_CLASSIFICATION_ORDER)[number];
+export type ClassificationCounts = Record<MoveClassification, number>;
+
+export type GameResultBanner = "WIN" | "LOSS" | "DRAW";
+
+function emptyClassificationCounts(): ClassificationCounts {
+  return {
+    Brilliant: 0,
+    Great: 0,
+    Best: 0,
+    Excellent: 0,
+    Good: 0,
+    Inaccuracy: 0,
+    Mistake: 0,
+    Blunder: 0,
+  };
+}
+
+/** Count each move classification, optionally restricted to a single side. */
+export function summarizeMoveClassifications(
+  moves: Array<{ label: string; side?: Color }>,
+  side?: Color
+): ClassificationCounts {
+  const counts = emptyClassificationCounts();
+  for (const move of moves) {
+    if (side && move.side !== side) continue;
+    if (move.label in counts) {
+      counts[move.label as MoveClassification] += 1;
+    }
+  }
+  return counts;
+}
+
+/** Derive the player's WIN/LOSS/DRAW banner from a result string and the player's color. */
+export function resultBannerForSide(result: string, side: Color = "w"): GameResultBanner {
+  const normalized = result.toLowerCase();
+  const whiteWon = normalized.includes("white wins");
+  const blackWon = normalized.includes("black wins");
+  if (!whiteWon && !blackWon) return "DRAW";
+  const playerWon = side === "w" ? whiteWon : blackWon;
+  return playerWon ? "WIN" : "LOSS";
+}
+
+/** Produce the exact post-game performance summary text block (spec Section 4). */
+export function formatPerformanceReport(
+  banner: GameResultBanner,
+  counts: ClassificationCounts
+): string {
+  return [
+    `[GAME OVER: ${banner}]`,
+    "------------------------------------",
+    "POST-GAME MOVE ANALYSIS REPORT",
+    "------------------------------------",
+    `Brilliant (!!) : ${counts.Brilliant}`,
+    `Great Move (*) : ${counts.Great}`,
+    `Best Move      : ${counts.Best}`,
+    `Excellent      : ${counts.Excellent}`,
+    `Good           : ${counts.Good}`,
+    `Inaccuracy (?) : ${counts.Inaccuracy}`,
+    `Mistake (?)    : ${counts.Mistake}`,
+    `Blunder (??)   : ${counts.Blunder}`,
+  ].join("\n");
 }
 
 export function scoreForLabel(label: string): number {

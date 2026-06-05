@@ -20,12 +20,15 @@ import { Chess, Square } from "chess.js";
 import { PIECE_URLS } from "@/lib/chess-constants";
 import {
   consumeAnalysisTransitionMs,
+  formatPerformanceReport,
   loadLatestFinishedGame,
   loadLatestGameReview,
   loadPersonalizedPuzzles,
+  resultBannerForSide,
   saveLatestGameReview,
   savePersonalizedPuzzles,
   scoreForLabel,
+  summarizeMoveClassifications,
   type GameReviewReport,
   type ReviewedPly,
 } from "@/lib/game-review";
@@ -152,6 +155,14 @@ export default function AnalyzeGame() {
     [moves]
   );
 
+  // Post-game performance summary from the player's (White) perspective (spec Section 4).
+  const performanceReport = useMemo(() => {
+    if (!report) return null;
+    const counts = summarizeMoveClassifications(moves, "w");
+    const banner = resultBannerForSide(report.result, "w");
+    return formatPerformanceReport(banner, counts);
+  }, [moves, report]);
+
   const trend = useMemo(() => {
     let wSum = 0;
     let wCount = 0;
@@ -251,6 +262,8 @@ export default function AnalyzeGame() {
       engineLabel: engineRef.current.getLabel(),
       engine: engineRef.current,
       depth: 10,
+      playerElo: snapshot.playerElo,
+      playerColor: snapshot.playerColor ?? "w",
       onProgress: (done, total) => {
         if (cancelled) return;
         setReviewProgress({ done, total });
@@ -503,6 +516,18 @@ export default function AnalyzeGame() {
               </svg>
             </div>
           </div>
+
+          {performanceReport && (
+            <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+              <p className="font-display text-sm font-semibold">Performance Summary</p>
+              <pre
+                data-testid="performance-report"
+                className="whitespace-pre overflow-x-auto rounded-md border border-border bg-background p-3 font-mono text-[11px] leading-5 text-foreground"
+              >
+                {performanceReport}
+              </pre>
+            </div>
+          )}
 
           <div className="rounded-lg border border-border bg-card p-4">
             <label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-2 mb-2">
