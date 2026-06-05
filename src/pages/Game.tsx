@@ -27,7 +27,8 @@ import {
   formatEngineInitError,
 } from "@/lib/stockfish";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
-import { BoardThemeSelect } from "@/components/BoardThemeSelect";
+import { GameSettingsMenu } from "@/components/GameSettingsMenu";
+import { useTheme } from "@/contexts/ThemeContext";
 import { PIECE_URLS } from "@/lib/chess-constants";
 import {
   type CoachId,
@@ -38,6 +39,7 @@ import { reviewTone } from "@/lib/review-colors";
 import {
   saveLatestFinishedGame,
 } from "@/lib/game-review";
+import { describeGameTermination } from "@/lib/game-termination";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -134,6 +136,7 @@ function eloPulseForResult(result: string, skillLevel: number): number {
 
 const Game = () => {
   const { user } = useAuth();
+  const { showValidMoves } = useTheme();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const difficultyParam = parseInt(searchParams.get("level") || "2");
@@ -165,6 +168,7 @@ const Game = () => {
     to: Square;
   } | null>(null);
   const [premoveEnabled, setPremoveEnabled] = useState(true);
+  const [playerElo, setPlayerElo] = useState<number | undefined>(undefined);
   const [queuedPremove, setQueuedPremove] = useState<QueuedPremove | null>(null);
   const [dailyMoveDeadlineMs, setDailyMoveDeadlineMs] = useState<number | null>(
     isDailyMode ? Date.now() + DAILY_MOVE_WINDOW_MS : null
@@ -228,21 +232,14 @@ const Game = () => {
 
     supabase
       .from("profiles")
-      .select("premove_enabled, username, display_name, rating, avatar_url")
+      .select("premove_enabled, rating")
       .eq("user_id", user.id)
       .maybeSingle()
       .then(({ data }) => {
         const enabled = data?.premove_enabled ?? true;
         setPremoveEnabled(enabled);
         localStorage.setItem(PREMOVE_STORAGE_KEY, JSON.stringify(enabled));
-        if (data) {
-          setProfile({
-            username: data.username ?? null,
-            display_name: data.display_name ?? null,
-            rating: data.rating ?? null,
-            avatar_url: data.avatar_url ?? null,
-          });
-        }
+        if (typeof data?.rating === "number") setPlayerElo(data.rating);
       });
   }, [user]);
 
@@ -332,11 +329,12 @@ const Game = () => {
     return () => engine.destroy();
   }, [difficulty.skill]);
 
-  // Keep eval updates active in practice mode (visible eval bar), and also when
-  // coach/review requires it in other modes.
+  // Eval is computed for the coach, for board scrubbing, and once the game has
+  // concluded (so the bar can be revealed). It is intentionally NOT surfaced to
+  // the user while a game is actively in progress (spec Section 1).
   const liveEvalNeeded = isPracticeMode || coach !== "none" || !!viewFen || !!gameOver;
   useEffect(() => {
-    if (!isPracticeMode || !liveEvalNeeded) return;
+    if (!liveEvalNeeded) return;
     if (!engineReady || !engineRef.current || engineError) return;
     const fen = viewFen || gameFen;
     const side = new Chess(fen).turn();
@@ -355,16 +353,11 @@ const Game = () => {
     });
   }, [gameFen, viewFen, engineReady, engineError, isPracticeMode, liveEvalNeeded]);
 
-  // Check game over
+  // Check game over (precise draw classification per spec Section 2).
   useEffect(() => {
-    if (game.isCheckmate()) {
-      setGameOver(game.turn() === "w" ? "Black wins by checkmate!" : "White wins by checkmate!");
-      ChessSounds.gameOver();
-    } else if (game.isDraw()) {
-      setGameOver("Draw!");
-      ChessSounds.gameOver();
-    } else if (game.isStalemate()) {
-      setGameOver("Stalemate!");
+    const termination = describeGameTermination(game);
+    if (termination.over && termination.message) {
+      setGameOver(termination.message);
       ChessSounds.gameOver();
     }
   }, [game]);
@@ -376,8 +369,10 @@ const Game = () => {
       pgn: game.pgn(),
       result: gameOver,
       engine: engineLabel,
+      playerElo,
+      playerColor: "w",
     });
-  }, [engineLabel, game, gameOver]);
+  }, [engineLabel, game, gameOver, playerElo]);
 
   // Stockfish plays black (use ref for position so this callback stays stable across white moves)
   const makeEngineMove = useCallback(async () => {
@@ -874,8 +869,9 @@ const Game = () => {
     };
   }, [gameOver, handleAnalyzeAction, handleNewOpponentAction, resetGame]);
 
-  // Practice mode keeps the eval bar visible; online/daily modes hide it.
-  const showEvalBar = isPracticeMode;
+  // The evaluation bar is strictly hidden during the active game across all modes
+  // and is only revealed once the game has completely concluded (spec Section 1).
+  const showEvalBar = !!gameOver;
   return (
     <div className="flex min-h-screen flex-col bg-cc-bg text-gray-200">
       {/* Top navigation bar */}
@@ -901,6 +897,7 @@ const Game = () => {
             <span className="rounded-full border border-cc-border px-3 py-1 font-body text-xs text-gray-400">
               {difficulty.label} (~{difficulty.rating})
             </span>
+            <GameSettingsMenu />
           </div>
         </div>
       </nav>
@@ -943,8 +940,52 @@ const Game = () => {
                 </div>
               </div>
 
-              {/* Eval bar + board row */}
-              <div className={`flex w-full ${showEvalBar ? "gap-2" : ""}`}>
+              <div className="rounded-md border border-border bg-background p-3 space-y-1">
+                <p className="font-body text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Mode
+                </p>
+                <p className="font-body text-sm text-foreground">
+                  {isDailyMode ? "Daily Chess" : "Standard Practice"}
+                </p>
+                {isDailyMode && (
+                  <p className="font-mono text-xs text-muted-foreground">
+                    Time left this move: {formatDuration(dailyClockMs)}
+                  </p>
+                )}
+                <p className="font-body text-xs text-muted-foreground">
+                  Premove: {premoveEnabled ? "On" : "Off"}{" "}
+                  {queuedPremove ? `(queued ${queuedPremove.from}-${queuedPremove.to})` : ""}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={resetGame}
+              className="w-full py-3 bg-card hover:bg-secondary rounded-lg flex items-center justify-center gap-2 transition-colors border border-border font-body text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              New Game
+            </button>
+
+            {coach !== "none" && (
+              <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+                <p className="font-display text-xs font-semibold text-foreground uppercase tracking-wider">
+                  Coach  -  {COACHES[coach].name}
+                </p>
+                <p className="font-body text-xs text-muted-foreground leading-relaxed min-h-[3rem]">
+                  {coachLine ||
+                    "Your philosopher-coach will comment after each of your moves. Play a move to begin."}
+                </p>
+                <p className="font-body text-[10px] text-muted-foreground/80">
+                  Add <span className="font-mono">?coach={coach}</span> to the URL to return to this guide.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Center - Board + Eval bar */}
+          <div className="lg:col-span-6 flex flex-col items-center order-1 lg:order-2">
+            <div className={`flex w-full max-w-[600px] ${showEvalBar ? "gap-2" : ""}`}>
               {/* Eval bar - hidden while a game is actively in progress. */}
               {showEvalBar && (
                 <div
@@ -988,6 +1029,7 @@ const Game = () => {
                     const isDragSource = dragging?.square === square;
                     const isDragTarget = dragOver === square && isValidTarget;
                     const showAmbienceDots =
+                      showValidMoves &&
                       !selectedSquare &&
                       !dragging &&
                       game.turn() === "w" &&
@@ -1065,7 +1107,7 @@ const Game = () => {
                         )}
 
                         {/* Valid move indicator */}
-                        {isValidTarget && !isDragTarget && (
+                        {showValidMoves && isValidTarget && !isDragTarget && (
                           <div className="absolute z-30 flex items-center justify-center w-full h-full pointer-events-none">
                             {piece && !isDragSource ? (
                               <div className="w-[82%] h-[82%] rounded-full border-[5px] border-cyan-100/45" />
