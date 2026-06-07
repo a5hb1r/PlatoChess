@@ -619,7 +619,7 @@ const Game = () => {
     setReviewReady(false);
     setHoveredSquare(null);
     resetClock();
-  };
+  }, [resetClock]);
 
   const goToMove = (index: number) => {
     const fullHistory = game.history();
@@ -1639,7 +1639,7 @@ const Game = () => {
             </div>
           </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 };
