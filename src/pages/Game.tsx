@@ -55,6 +55,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/use-profile";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getBotById, isBotUnlocked } from "@/lib/bots";
+import { PIECE_URLS } from "@/lib/chess-constants";
 import {
   getPersonality,
   getBotLine,
@@ -207,6 +208,34 @@ const Game = () => {
     y: number;
   } | null>(null);
   const [dragOver, setDragOver] = useState<Square | null>(null);
+
+  // Premove state
+  const [premoveEnabled, setPremoveEnabled] = useState<boolean>(() => {
+    try { return JSON.parse(localStorage.getItem(PREMOVE_STORAGE_KEY) ?? "true"); } catch { return true; }
+  });
+  const [queuedPremove, setQueuedPremove] = useState<QueuedPremove | null>(() => {
+    try { const s = localStorage.getItem(PREMOVE_QUEUE_STORAGE_KEY); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
+
+  // Player ELO (loaded from profile)
+  const [playerElo, setPlayerElo] = useState<number>(1200);
+
+  // Daily mode deadline
+  const [dailyMoveDeadlineMs, setDailyMoveDeadlineMs] = useState<number | null>(null);
+
+  // Post-game review state
+  const [reviewReady, setReviewReady] = useState(false);
+  const [reviewingGame, setReviewingGame] = useState(false);
+  const [reviewProgress, setReviewProgress] = useState(0);
+  const [reviewSummary, setReviewSummary] = useState<string | null>(null);
+
+  // Daily mode per-move clock display (ms remaining for current move)
+  const [dailyClockMs, setDailyClockMs] = useState<number>(DAILY_MOVE_WINDOW_MS);
+
+  // Online / human-vs-human chat
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+
   const boardRef = useRef<HTMLDivElement>(null);
   const gameOverActionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const lastEvalUiUpdateRef = useRef(0);
@@ -220,6 +249,20 @@ const Game = () => {
 
   const displayFen = viewFen || game.fen();
   const displayGame = useMemo(() => new Chess(displayFen), [displayFen]);
+
+  // Eval bar: convert centipawn score to a 0-100 white percentage
+  const whitePercent = useMemo(() => {
+    if (evalMate !== null) return evalMate > 0 ? 100 : 0;
+    const cp = Math.max(-1000, Math.min(1000, eval_));
+    return Math.round(50 + (cp / 1000) * 45);
+  }, [eval_, evalMate]);
+
+  // Human-readable eval string (+1.23, M5, etc.)
+  const evalDisplay = useMemo(() => {
+    if (evalMate !== null) return `M${Math.abs(evalMate)}`;
+    const sign = eval_ >= 0 ? "+" : "";
+    return `${sign}${(eval_ / 100).toFixed(2)}`;
+  }, [eval_, evalMate]);
 
   const allLegalDestinations = useMemo(() => {
     const s = new Set<Square>();
@@ -307,21 +350,16 @@ const Game = () => {
     return () => window.clearInterval(interval);
   }, [dailyMoveDeadlineMs, game, gameOver, isDailyMode]);
 
-  // Cosmetic per-player countdown that ticks for whoever is on the move. It
-  // never flags the game (just clamps at 0) so it cannot interfere with the
-  // practice-vs-engine flow; it only signals whose turn it is. Daily mode keeps
-  // its own dedicated 24h-per-move clock instead.
+  // Clock direction: useChessClock hook handles the per-player countdown.
+  // setActive controls whose side is ticking.
   useEffect(() => {
-    if (isDailyMode || gameOver || viewFen || gameIsOver) return;
-    const interval = window.setInterval(() => {
-      if (gameTurn === "w") {
-        setWhiteClockMs((ms) => Math.max(0, ms - 1000));
-      } else {
-        setBlackClockMs((ms) => Math.max(0, ms - 1000));
-      }
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [gameTurn, gameOver, viewFen, gameIsOver, isDailyMode]);
+    if (isDailyMode || gameOver || gameIsOver) {
+      setRunning(false);
+    } else {
+      setActive(gameTurn === "w" ? "white" : "black");
+      setRunning(!viewFen);
+    }
+  }, [gameTurn, gameOver, gameIsOver, isDailyMode, viewFen, setActive, setRunning]);
 
   // --- Material + captured pieces (derived from the displayed position) ---
   const material = useMemo(() => computeMaterial(displayFen), [displayFen]);
