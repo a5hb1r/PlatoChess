@@ -42,7 +42,11 @@ import { buildPersonalizedPuzzles } from "@/lib/personalized-puzzles";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useProfile } from "@/hooks/use-profile";
 import { useAuth } from "@/contexts/AuthContext";
-import { recordPlacementResult } from "@/lib/placement";
+import {
+  applyPlacementResult,
+  getGuestSession,
+  saveGuestSession,
+} from "@/lib/guest-session";
 import { Lock } from "lucide-react";
 
 function squareCenter(square: Square): { x: number; y: number } {
@@ -109,7 +113,7 @@ function TheoryNode({
 export default function AnalyzeGame() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isPro, loading: profileLoading, profile, placementGamesRemaining } = useProfile();
+  const { isPro, loading: profileLoading, isGuest } = useProfile();
   const engineRef = useRef<StockfishEngine | null>(null);
   const [report, setReport] = useState<GameReviewReport | null>(() => loadLatestGameReview());
   const [reviewing, setReviewing] = useState(false);
@@ -316,23 +320,13 @@ export default function AnalyzeGame() {
         setReport(nextReport);
         setSelectedPly(nextReport.moves.length);
 
-        // Placement: adjust rating based on the player's accuracy this game
-        if (
-          user &&
-          profile &&
-          placementGamesRemaining !== null &&
-          placementGamesRemaining > 0 &&
-          profile.onboarding_elo_bracket
-        ) {
-          // Use white accuracy (player is always white vs Stockfish)
-          const accuracy = nextReport.accuracy?.w ?? 50;
-          recordPlacementResult({
-            userId: user.id,
-            accuracy,
-            currentRating: profile.rating,
-            bracket: profile.onboarding_elo_bracket,
-            placementGamesRemaining,
-          });
+        // Placement: adjust guest rating based on accuracy this game
+        if (!user) {
+          const gs = getGuestSession();
+          if (gs && gs.onboardingComplete && gs.placementGamesRemaining > 0) {
+            const accuracy = nextReport.accuracy?.w ?? 50;
+            saveGuestSession(applyPlacementResult(gs, accuracy));
+          }
         }
       })
       .catch((err) => {
@@ -610,8 +604,8 @@ export default function AnalyzeGame() {
     );
   }
 
-  // Paywall: full game analysis requires Pro or Master (bypassed in local dev)
-  if (!import.meta.env.DEV && !profileLoading && !isPro) {
+  // Paywall: full game analysis requires Pro or Master (guests and dev bypass)
+  if (!import.meta.env.DEV && !profileLoading && !isPro && !isGuest) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">

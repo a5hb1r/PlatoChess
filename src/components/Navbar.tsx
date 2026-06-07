@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useProfile } from "@/hooks/use-profile";
+import { getGuestSession } from "@/lib/guest-session";
 import { LogOut, Settings, LayoutDashboard, Swords } from "lucide-react";
 import { LogoMark } from "@/components/LogoMark";
 import type { BoardThemeId } from "@/lib/chess-themes";
@@ -10,7 +11,9 @@ import { BOARD_THEMES } from "@/lib/chess-themes";
 const Navbar = () => {
   const { user, signOut } = useAuth();
   const { boardTheme, setBoardTheme } = useTheme();
-  const { placementGamesRemaining, profile } = useProfile();
+  const { placementGamesRemaining, isGuest } = useProfile();
+  const guestRating = isGuest ? (getGuestSession()?.rating ?? null) : null;
+  const guestDone = isGuest && placementGamesRemaining === 0;
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-md">
@@ -23,9 +26,9 @@ const Navbar = () => {
               Placement · {placementGamesRemaining} left
             </span>
           )}
-          {placementGamesRemaining === 0 && profile?.rating && (
+          {guestDone && guestRating !== null && (
             <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
-              {profile.rating} ELO
+              {guestRating} ELO
             </span>
           )}
         </div>

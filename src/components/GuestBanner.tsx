@@ -2,16 +2,15 @@ import { Link } from "react-router-dom";
 import { UserPlus, X } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { getGuestSession } from "@/lib/guest-session";
 
-/**
- * Sticky top banner shown to anonymous guests nudging them to create a real account.
- * Dismissable for the session (not permanently).
- */
 export function GuestBanner() {
-  const { isGuest } = useAuth();
+  const { user } = useAuth();
   const [dismissed, setDismissed] = useState(false);
 
-  if (!isGuest || dismissed) return null;
+  // Only show for unauthenticated visitors who have completed onboarding
+  const guest = getGuestSession();
+  if (user || dismissed || !guest?.onboardingComplete) return null;
 
   return (
     <div className="fixed bottom-0 inset-x-0 z-40 bg-card border-t border-border px-4 py-3 flex items-center justify-between gap-4 shadow-lg">

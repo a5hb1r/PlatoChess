@@ -7,18 +7,14 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  isGuest: boolean;
   signOut: () => Promise<void>;
-  convertGuestToAccount: (email: string, password: string, displayName?: string) => Promise<{ error: string | null }>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   session: null,
   loading: true,
-  isGuest: false,
   signOut: async () => {},
-  convertGuestToAccount: async () => ({ error: null }),
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -27,8 +23,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-
-  const isGuest = Boolean(user?.app_metadata?.is_anonymous);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -39,21 +33,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     );
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session) {
-        setSession(session);
-        setUser(session.user);
-        setLoading(false);
-      } else {
-        // No existing session — create an anonymous one so the user is
-        // immediately active without having to sign up.
-        const { data, error } = await supabase.auth.signInAnonymously();
-        if (!error && data.session) {
-          setSession(data.session);
-          setUser(data.user);
-        }
-        setLoading(false);
-      }
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -113,34 +96,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await supabase.auth.signOut();
   };
 
-  /** Upgrade an anonymous guest to a real email/password account. */
-  const convertGuestToAccount = async (
-    email: string,
-    password: string,
-    displayName?: string
-  ): Promise<{ error: string | null }> => {
-    try {
-      const { error } = await supabase.auth.updateUser({
-        email,
-        password,
-        data: displayName ? { full_name: displayName } : undefined,
-      });
-      if (error) return { error: error.message };
-      // Clear is_guest flag in profiles table
-      if (user) {
-        await supabase
-          .from("profiles")
-          .update({ is_guest: false, display_name: displayName || undefined })
-          .eq("user_id", user.id);
-      }
-      return { error: null };
-    } catch (e) {
-      return { error: e instanceof Error ? e.message : "Failed to create account" };
-    }
-  };
-
   return (
-    <AuthContext.Provider value={{ user, session, loading, isGuest, signOut, convertGuestToAccount }}>
+    <AuthContext.Provider value={{ user, session, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   );

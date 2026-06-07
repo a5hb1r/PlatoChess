@@ -39,7 +39,7 @@ const App = () => {
         <BrowserRouter>
           <ThemeProvider>
             <AuthProvider>
-              <GuestOnboarding onDone={() => {}} />
+              <GuestOnboarding />
               <GuestBanner />
               <Routes>
                 <Route path="/" element={<Index />} />
