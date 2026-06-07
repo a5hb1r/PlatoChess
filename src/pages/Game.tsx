@@ -16,6 +16,9 @@ import {
   Sparkles,
   Trophy,
   Lock,
+  FlipVertical2,
+  Download,
+  Copy,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Chess, Square, PieceSymbol, Color } from "chess.js";
@@ -26,7 +29,7 @@ import {
   formatEngineInitError,
 } from "@/lib/stockfish";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
-import { BoardThemeSelect } from "@/components/BoardThemeSelect";
+import { GameSettingsMenu } from "@/components/GameSettingsMenu";
 import { Switch } from "@/components/ui/switch";
 import { PieceImage } from "@/components/chess/PieceImage";
 import { EvalBar } from "@/components/chess/EvalBar";
@@ -109,15 +112,17 @@ function parseCoachId(raw: string | null): CoachId {
   return "none";
 }
 
-// Helper to get square from mouse/touch position relative to board (white at bottom).
-function getSquareFromPoint(boardEl: HTMLElement, clientX: number, clientY: number): Square | null {
+// Helper to get square from mouse/touch position relative to board.
+function getSquareFromPoint(boardEl: HTMLElement, clientX: number, clientY: number, flipped = false): Square | null {
   const rect = boardEl.getBoundingClientRect();
   const x = clientX - rect.left;
   const y = clientY - rect.top;
   const col = Math.floor((x / rect.width) * 8);
   const row = Math.floor((y / rect.height) * 8);
   if (col < 0 || col > 7 || row < 0 || row > 7) return null;
-  return `${String.fromCharCode(97 + col)}${8 - row}` as Square;
+  const fc = flipped ? 7 - col : col;
+  const fr = flipped ? 7 - row : row;
+  return `${String.fromCharCode(97 + fc)}${8 - fr}` as Square;
 }
 
 function summarizeResultLabel(result: string): string {
@@ -205,6 +210,9 @@ const Game = () => {
     y: number;
   } | null>(null);
   const [dragOver, setDragOver] = useState<Square | null>(null);
+
+  // Board orientation
+  const [boardFlipped, setBoardFlipped] = useState(false);
 
   // Premove state
   const [premoveEnabled, setPremoveEnabled] = useState<boolean>(() => {
@@ -392,6 +400,7 @@ const Game = () => {
       const now = performance.now();
       const shouldRefreshUi = now - lastEvalUiUpdateRef.current >= EVAL_UPDATE_INTERVAL_MS;
       if (!shouldRefreshUi) return;
+      if (info.depth !== undefined) setEvalDepth(info.depth);
       if (info.mate !== undefined) {
         setEvalMate(info.mate);
         setEval_(info.mate > 0 ? 2000 : -2000);
@@ -529,6 +538,26 @@ const Game = () => {
     botMessageEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [botMessages]);
   // ────────────────────────────────────────────────────────────────────────
+
+  const downloadPgn = useCallback(() => {
+    const pgn = game.pgn() || "*";
+    const blob = new Blob([pgn], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "platochess-game.pgn";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("PGN downloaded.");
+  }, [game]);
+
+  const copyPgn = useCallback(() => {
+    const pgn = game.pgn() || "*";
+    navigator.clipboard.writeText(pgn).then(
+      () => toast.success("PGN copied to clipboard."),
+      () => toast.error("Clipboard not available.")
+    );
+  }, [game]);
 
   const executeMove = useCallback(
     (from: Square, to: Square, promotion?: string) => {
@@ -668,7 +697,7 @@ const Game = () => {
       const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
       const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
       setDragging((prev) => (prev ? { ...prev, x: clientX, y: clientY } : null));
-      if (boardRef.current) setDragOver(getSquareFromPoint(boardRef.current, clientX, clientY));
+      if (boardRef.current) setDragOver(getSquareFromPoint(boardRef.current, clientX, clientY, boardFlipped));
     };
 
     const handleEnd = (e: MouseEvent | TouchEvent) => {
@@ -679,7 +708,7 @@ const Game = () => {
       }
       const clientX = "changedTouches" in e ? e.changedTouches[0].clientX : e.clientX;
       const clientY = "changedTouches" in e ? e.changedTouches[0].clientY : e.clientY;
-      const targetSquare = getSquareFromPoint(boardRef.current, clientX, clientY);
+      const targetSquare = getSquareFromPoint(boardRef.current, clientX, clientY, boardFlipped);
 
       if (targetSquare && validMoves.includes(targetSquare)) {
         const movingPiece = game.get(dragging.square);
@@ -851,41 +880,6 @@ const Game = () => {
       setReviewingGame(false);
     }
   }, [eval_, gameOver]);
-
-  // A single move cell in the sidebar move log. Highlights with a distinct
-  // background when it is the position currently shown on the board.
-  const renderMoveCell = (
-    move: { san: string; rating?: { label: string; color: string } } | undefined,
-    ply: number
-  ) => {
-    if (!move) return <div />;
-    const active = historyIndex === ply;
-    const toneText = move.rating?.label
-      ? reviewTone(move.rating.label).text
-      : "text-gray-200";
-    return (
-      <button
-        type="button"
-        onClick={() => goToMove(ply)}
-        className={`flex items-center gap-1.5 px-3 py-2 text-left font-body text-sm transition-colors ${
-          active
-            ? "bg-cc-green font-semibold text-white"
-            : `hover:bg-white/5 ${toneText}`
-        }`}
-      >
-        <span>{move.san}</span>
-        {move.rating?.label && (
-          <span
-            className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${reviewTone(
-              move.rating.label
-            ).chip}`}
-          >
-            {move.rating.label}
-          </span>
-        )}
-      </button>
-    );
-  };
 
   const evalText =
     evalMate != null ? `${evalMate > 0 ? "" : "-"}M${Math.abs(evalMate)}` : eval_ >= 0 ? `+${(eval_ / 100).toFixed(1)}` : (eval_ / 100).toFixed(1);
@@ -1099,7 +1093,9 @@ const Game = () => {
                     {Array.from({ length: 64 }, (_, i) => {
                       const row = Math.floor(i / 8);
                       const col = i % 8;
-                      const square = `${String.fromCharCode(97 + col)}${8 - row}` as Square;
+                      const fc = boardFlipped ? 7 - col : col;
+                      const fr = boardFlipped ? 7 - row : row;
+                      const square = `${String.fromCharCode(97 + fc)}${8 - fr}` as Square;
                       const piece = displayGame.get(square);
                       const isDark = (row + col) % 2 === 1;
                       const isSelected = selectedSquare === square;
@@ -1160,7 +1156,7 @@ const Game = () => {
                                 isDark ? "text-chess-light/80" : "text-chess-dark/80"
                               }`}
                             >
-                              {8 - row}
+                              {boardFlipped ? fr + 1 : 8 - fr}
                             </span>
                           )}
                           {row === 7 && (
@@ -1169,7 +1165,7 @@ const Game = () => {
                                 isDark ? "text-chess-light/80" : "text-chess-dark/80"
                               }`}
                             >
-                              {String.fromCharCode(97 + col)}
+                              {String.fromCharCode(97 + fc)}
                             </span>
                           )}
 
@@ -1294,6 +1290,14 @@ const Game = () => {
                           >
                             New Opponent
                           </button>
+                          <button
+                            onClick={copyPgn}
+                            className="flex items-center gap-1.5 rounded-lg border border-border bg-card/90 px-5 py-2.5 font-body text-sm font-medium text-muted-foreground transition-all hover:bg-secondary hover:text-foreground hover:scale-[1.02]"
+                            title="Copy game PGN"
+                          >
+                            <Copy className="h-4 w-4" />
+                            PGN
+                          </button>
                         </div>
                       </motion.div>
                     )}
@@ -1361,6 +1365,14 @@ const Game = () => {
                 >
                   <RotateCcw className="h-4 w-4 text-muted-foreground" />
                 </button>
+                <button
+                  onClick={() => setBoardFlipped((f) => !f)}
+                  className={`rounded-lg border p-2.5 transition-colors ${boardFlipped ? "border-primary/60 bg-primary/10 text-primary" : "border-border bg-card hover:bg-secondary text-muted-foreground"}`}
+                  aria-label="Flip board"
+                  title="Flip board"
+                >
+                  <FlipVertical2 className="h-4 w-4" />
+                </button>
               </div>
 
               {engineError && (
@@ -1408,7 +1420,9 @@ const Game = () => {
                 </div>
               )}
 
-              <BoardThemeSelect className="mt-1" />
+              <div className="mt-2 flex items-center justify-between">
+                <GameSettingsMenu />
+              </div>
             </div>
 
             {/* Move history */}
@@ -1461,6 +1475,24 @@ const Game = () => {
                     Open Full Review →
                   </button>
                 )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={downloadPgn}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-card py-2 font-body text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-secondary"
+                    title="Download PGN file"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download PGN
+                  </button>
+                  <button
+                    onClick={copyPgn}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-card py-2 font-body text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-secondary"
+                    title="Copy PGN to clipboard"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy PGN
+                  </button>
+                </div>
               </div>
             )}
 
