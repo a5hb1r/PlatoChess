@@ -14,6 +14,8 @@ import {
   BarChart3,
   Eye,
   Sparkles,
+  Trophy,
+  Lock,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Chess, Square, PieceSymbol, Color } from "chess.js";
@@ -38,6 +40,7 @@ import { probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
 import {
   type CoachId,
   coachOnEval,
+  coachOnMoveRating,
   COACHES,
 } from "@/lib/philosopher-coaches";
 import {
@@ -51,7 +54,6 @@ import { describeGameTermination } from "@/lib/game-termination";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/use-profile";
 import { getBotById, isBotUnlocked } from "@/lib/bots";
-import { Lock } from "lucide-react";
 import {
   getPersonality,
   getBotLine,
