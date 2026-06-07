@@ -152,7 +152,11 @@ export class StockfishEngine {
       if (multiPvMatch) info.multipv = parseInt(multiPvMatch[1], 10);
 
       const pvMatch = line.match(/\bpv (.+)/);
-      if (pvMatch) info.pvLine = pvMatch[1].trim();
+      if (pvMatch) {
+        const full = pvMatch[1].trim();
+        info.pvLine = full;
+        info.pv = full.split(/\s+/)[0];
+      }
 
       if (info.score !== undefined || info.mate !== undefined) {
         this.onInfo(info);

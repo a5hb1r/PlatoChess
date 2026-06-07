@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Filter,
   Gauge,
   Lightbulb,
   Loader2,
@@ -60,9 +59,7 @@ function formatEval(evalCp: number, mate?: number | null): string {
   return `${evalCp >= 0 ? "+" : ""}${(evalCp / 100).toFixed(2)}`;
 }
 
-type FilterId = "all" | "good" | "errors" | "critical" | "white" | "black";
 const MISTAKE_LABELS = new Set(["Inaccuracy", "Mistake", "Blunder"]);
-const HIGH_QUALITY_LABELS = new Set(["Brilliant", "Best", "Excellent", "Good"]);
 
 function isMistakeLike(label: string): boolean {
   return MISTAKE_LABELS.has(label);
@@ -114,8 +111,6 @@ export default function AnalyzeGame() {
   const [engineLabel, setEngineLabel] = useState(STOCKFISH_VERSION_LABEL);
   const [engineReady, setEngineReady] = useState(false);
   const [engineError, setEngineError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterId>("all");
-  const [onlyMistakes, setOnlyMistakes] = useState(false);
   const [selectedPly, setSelectedPly] = useState<number>(report?.moves.length ?? 0);
   const [liveEvalCp, setLiveEvalCp] = useState(0);
   const [liveEvalMate, setLiveEvalMate] = useState<number | null>(null);
@@ -138,9 +133,30 @@ export default function AnalyzeGame() {
   const [retryFeedback, setRetryFeedback] = useState<{ ok: boolean; msg: string } | null>(null);
   const [retrySolved, setRetrySolved] = useState(false);
 
+  const moveListRef = useRef<HTMLDivElement>(null);
+
   const moves = useMemo(() => report?.moves ?? [], [report]);
   const boundedPly = Math.max(0, Math.min(selectedPly, moves.length));
   const current: ReviewedPly | null = boundedPly > 0 ? moves[boundedPly - 1] : null;
+
+  // Pair moves chess.com style: [{num, w, b}]
+  const movePairs = useMemo(() => {
+    const pairs: Array<{ num: number; w: ReviewedPly | null; b: ReviewedPly | null }> = [];
+    let i = 0;
+    while (i < moves.length) {
+      const m = moves[i];
+      const num = Math.ceil(m.ply / 2);
+      if (m.side === "w") {
+        const next = moves[i + 1];
+        pairs.push({ num, w: m, b: next?.side === "b" ? next : null });
+        i += next?.side === "b" ? 2 : 1;
+      } else {
+        pairs.push({ num, w: null, b: m });
+        i++;
+      }
+    }
+    return pairs;
+  }, [moves]);
   const boardFen = current?.fenAfter ?? new Chess().fen();
   const renderedFen = previewFen ?? boardFen;
   // While retrying, the board shows the position *before* the error so the
@@ -162,32 +178,11 @@ export default function AnalyzeGame() {
   const best = previewFen ? null : parseUci(current?.bestUci);
   const played = previewFen ? null : parseUci(current?.playedUci);
 
-  const filtered = useMemo(
-    () =>
-      moves.filter((m) => {
-        if (onlyMistakes && !isMistakeLike(m.label)) return false;
-        if (filter === "all") return true;
-        if (filter === "white") return m.side === "w";
-        if (filter === "black") return m.side === "b";
-        if (filter === "critical") return m.label === "Mistake" || m.label === "Blunder";
-        if (filter === "errors") return isMistakeLike(m.label);
-        return HIGH_QUALITY_LABELS.has(m.label);
-      }),
-    [filter, moves, onlyMistakes]
-  );
 
   const criticalPlies = useMemo(
     () => moves.filter((m) => m.label === "Mistake" || m.label === "Blunder").map((m) => m.ply),
     [moves]
   );
-
-  // Post-game performance summary from the player's (White) perspective (spec Section 4).
-  const performanceReport = useMemo(() => {
-    if (!report) return null;
-    const counts = summarizeMoveClassifications(moves, "w");
-    const banner = resultBannerForSide(report.result, "w");
-    return formatPerformanceReport(banner, counts);
-  }, [moves, report]);
 
   const trend = useMemo(() => {
     let wSum = 0;
@@ -252,6 +247,12 @@ export default function AnalyzeGame() {
   useEffect(() => {
     setTransitionMs(consumeAnalysisTransitionMs());
   }, []);
+
+  // Auto-scroll move list to current ply
+  useEffect(() => {
+    const el = moveListRef.current?.querySelector<HTMLElement>(`[data-ply="${boundedPly}"]`);
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [boundedPly]);
 
   // Leaving the current ply abandons any in-progress retry.
   useEffect(() => {
@@ -669,45 +670,6 @@ export default function AnalyzeGame() {
             </div>
           </div>
 
-          {performanceReport && (
-            <div className="rounded-lg border border-border bg-card p-4 space-y-2">
-              <p className="font-display text-sm font-semibold">Performance Summary</p>
-              <pre
-                data-testid="performance-report"
-                className="whitespace-pre overflow-x-auto rounded-md border border-border bg-background p-3 font-mono text-[11px] leading-5 text-foreground"
-              >
-                {performanceReport}
-              </pre>
-            </div>
-          )}
-
-          <div className="rounded-lg border border-border bg-card p-4">
-            <label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-2 mb-2">
-              <Filter className="w-3 h-3" />
-              Move Filter
-            </label>
-            <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value as FilterId)}
-              className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm"
-            >
-              <option value="all">All moves</option>
-              <option value="good">Good moves</option>
-              <option value="errors">Errors</option>
-              <option value="critical">Critical errors</option>
-              <option value="white">White only</option>
-              <option value="black">Black only</option>
-            </select>
-            <label className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={onlyMistakes}
-                onChange={(e) => setOnlyMistakes(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-border bg-background"
-              />
-              Show only mistake-class moves
-            </label>
-          </div>
 
           <div className="hidden lg:block rounded-lg border border-border bg-card p-4">
             <p className="font-display text-sm font-semibold mb-2">Analysis Side Menu</p>
@@ -722,31 +684,6 @@ export default function AnalyzeGame() {
         </aside>
 
         <main className="lg:col-span-6 space-y-4">
-          <div className="rounded-lg border border-border bg-card p-3">
-            <p className="text-xs text-muted-foreground mb-2">Move Rating Timeline</p>
-            <div className="overflow-x-auto">
-              <div className="flex items-end gap-1 min-w-max">
-                {moves.map((move) => (
-                  <button
-                    key={move.ply}
-                    onClick={() => {
-                      setSelectedPly(move.ply);
-                      setPreviewFen(null);
-                    }}
-                    className={`h-11 w-7 rounded-sm border text-[9px] font-mono ${
-                      selectedPly === move.ply && !previewFen
-                        ? "border-primary bg-secondary"
-                        : `border-border ${reviewTone(move.label).row}`
-                    }`}
-                    title={`${move.ply}. ${move.san} — ${move.label} (${move.cpLoss.toFixed(0)} cp)`}
-                  >
-                    {move.ply}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
           <div className="rounded-lg overflow-hidden border border-border shadow-elevated aspect-square relative">
             <div className="grid grid-cols-8 grid-rows-8 w-full h-full">
               {Array.from({ length: 64 }, (_, i) => {
@@ -916,44 +853,61 @@ export default function AnalyzeGame() {
         </main>
 
         <aside className="lg:col-span-3 space-y-4">
-          <div className="rounded-lg border border-border bg-card p-4 max-h-[42vh] overflow-y-auto">
-            <h3 className="font-display text-sm font-semibold mb-3 flex items-center gap-2">
-              <Target className="w-4 h-4" />
-              Move Review ({filtered.length})
-            </h3>
-            {criticalPlies.length > 0 && (
-              <div className="mb-3 rounded-md border border-border bg-background px-2 py-1 text-[10px] text-muted-foreground">
-                Critical plies: {criticalPlies.join(", ")}
-              </div>
-            )}
-            <div className="space-y-1">
-              {filtered.map((m) => (
-                <button
-                  key={m.ply}
-                  onClick={() => {
-                    setSelectedPly(m.ply);
-                    setPreviewFen(null);
-                  }}
-                  className={`w-full text-left rounded-md px-3 py-2 border transition-colors ${
-                    selectedPly === m.ply && !previewFen
-                      ? "bg-secondary border-border"
-                      : "border-transparent hover:bg-secondary/70"
-                  } ${reviewTone(m.label).row}`}
-                  style={{ borderLeftWidth: 4 }}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`font-mono text-xs ${reviewTone(m.label).text}`}>
-                      {m.ply}. {m.san}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className={`text-[10px] font-semibold ${reviewTone(m.label).text}`}>{m.label}</span>
-                      <MoveGlyph label={m.label} size={16} />
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    cp loss: {m.cpLoss.toFixed(0)}
-                  </p>
-                </button>
+          {/* Chess.com-style move list */}
+          <div className="rounded-lg border border-border bg-card overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+              <h3 className="font-display text-sm font-semibold flex items-center gap-2">
+                <Target className="w-4 h-4" />
+                Moves
+              </h3>
+              <button
+                onClick={() => { setSelectedPly(0); setPreviewFen(null); }}
+                className="text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-0.5 hover:bg-secondary transition-colors"
+              >
+                From Start
+              </button>
+            </div>
+            <div ref={moveListRef} className="p-2 max-h-[44vh] overflow-y-auto">
+              {movePairs.map(({ num, w, b }) => (
+                <div key={num} className="grid grid-cols-[2rem_1fr_1fr] items-stretch gap-0.5 mb-0.5">
+                  <span className="flex items-center justify-end pr-2 text-[11px] text-muted-foreground select-none">
+                    {num}.
+                  </span>
+                  {/* White move */}
+                  {w ? (
+                    <button
+                      data-ply={w.ply}
+                      onClick={() => { setSelectedPly(w.ply); setPreviewFen(null); }}
+                      className={`flex items-center justify-between gap-1 px-2 py-1 rounded text-xs font-mono text-left transition-colors ${
+                        boundedPly === w.ply && !previewFen
+                          ? "bg-secondary border border-border text-foreground"
+                          : "hover:bg-secondary/60 text-foreground/90"
+                      }`}
+                    >
+                      <span>{w.san}</span>
+                      <MoveGlyph label={w.label} size={14} />
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                  {/* Black move */}
+                  {b ? (
+                    <button
+                      data-ply={b.ply}
+                      onClick={() => { setSelectedPly(b.ply); setPreviewFen(null); }}
+                      className={`flex items-center justify-between gap-1 px-2 py-1 rounded text-xs font-mono text-left transition-colors ${
+                        boundedPly === b.ply && !previewFen
+                          ? "bg-secondary border border-border text-foreground"
+                          : "hover:bg-secondary/60 text-foreground/90"
+                      }`}
+                    >
+                      <span>{b.san}</span>
+                      <MoveGlyph label={b.label} size={14} />
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                </div>
               ))}
             </div>
           </div>
