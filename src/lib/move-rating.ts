@@ -1,4 +1,59 @@
-import type { Color, Move } from "chess.js";
+import { Chess, type Color, type Move, type PieceSymbol } from "chess.js";
+
+/** Elo at/above which a player is treated as "high level" for brilliancy scaling. */
+export const BRILLIANT_ELO_THRESHOLD = 1200;
+
+const PIECE_VALUE: Record<PieceSymbol, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
+/**
+ * Static, level-independent detection of a piece sacrifice (spec Section 3).
+ *
+ * A move counts as a sacrifice when a non-pawn piece is placed on a square where
+ * the opponent can capture it, and the material gained on the move is strictly
+ * less than the value of the piece committed (i.e. material is given up). Equal
+ * or material-winning captures are not sacrifices.
+ */
+export function moveIsSacrifice(fenBefore: string, move: Pick<Move, "from" | "to" | "promotion">): boolean {
+  const board = new Chess();
+  try {
+    board.load(fenBefore);
+  } catch {
+    return false;
+  }
+  const piece = board.get(move.from as Move["from"]);
+  if (!piece) return false;
+  const movedType = piece.type;
+  if (movedType === "p" || movedType === "k") return false; // only piece sacrifices
+
+  const result = board.move({ from: move.from, to: move.to, promotion: move.promotion });
+  if (!result) return false;
+
+  const gained = result.captured ? PIECE_VALUE[result.captured] : 0;
+  const movedValue = PIECE_VALUE[movedType];
+  if (gained >= movedValue) return false; // even trade or winning capture, not a sacrifice
+
+  // After our move it is the opponent's turn; can they capture the committed piece?
+  const recaptureExists = board
+    .moves({ verbose: true })
+    .some((m) => m.to === move.to && !!m.captured);
+  return recaptureExists;
+}
+
+/**
+ * Decide the brilliancy verdict for a confirmed, position-maintaining sacrifice,
+ * scaled by the player's Elo (spec Section 3).
+ *
+ * - Below the threshold: any such sacrifice is Brilliant (hard to spot at low level).
+ * - At/above the threshold: only the uniquely best (only winning/saving) sacrifice
+ *   is Brilliant; standard/visible sacrifices are downgraded to a Best move.
+ */
+export function brilliancyVerdictForLevel(
+  playerElo: number | undefined,
+  isOnlyGoodMove: boolean
+): "brilliant" | "best" {
+  if (playerElo === undefined || playerElo < BRILLIANT_ELO_THRESHOLD) return "brilliant";
+  return isOnlyGoodMove ? "brilliant" : "best";
+}
 
 /** Map UI eval (may use 9999 for mate) to comparable centipawn scale (white = positive). */
 export function uiEvalToCp(evalVal: number): number {
@@ -64,12 +119,22 @@ function cpLossForSide(beforeCpWhite: number, afterCpWhite: number, side: Color)
  * Chess.com-style coarse labeling (post-game analysis).
  * Not identical to proprietary logic, but intentionally similar UX semantics.
  */
+export interface MoveRatingOptions {
+  /** Player Elo, used to scale the brilliancy threshold (spec Section 3). */
+  playerElo?: number;
+  /** Whether the played move is the unique best (only winning/saving) move. */
+  isOnlyGoodMove?: boolean;
+  /** Pre-computed sacrifice flag (overrides the internal heuristic when provided). */
+  isSacrifice?: boolean;
+}
+
 export function rateMoveLikeChessCom(
   side: Color,
   beforeProbe: { score?: number; mate?: number },
   afterProbe: { score?: number; mate?: number },
   playedMove: Move,
-  bestMoveUci?: string
+  bestMoveUci?: string,
+  options?: MoveRatingOptions
 ): RatedMove {
   const beforeCp = probeResultToCp(beforeProbe);
   const afterCp = probeResultToCp(afterProbe);
@@ -79,31 +144,48 @@ export function rateMoveLikeChessCom(
   const isBest = !!bestMoveUci && playedUci === bestMoveUci;
   const isCheck = playedMove.san.includes("+") || playedMove.san.includes("#");
   const isCapture = playedMove.san.includes("x");
-  const isSacrifice = !isCapture && /[QRBN]/.test(playedMove.san) && cpLoss <= 20;
+  const isSacrifice = !isCapture && /[QRBN]/.test(playedMove.san) && cpLoss <= 24;
 
-  if (isBest || cpLoss <= 8) {
+  // Eval from the moving side's point of view (positive = good for the mover).
+  const beforeForSide = side === "w" ? beforeCp : -beforeCp;
+  const afterForSide = side === "w" ? afterCp : -afterCp;
+  const beforeMateForSide =
+    beforeProbe.mate !== undefined && beforeProbe.mate !== 0
+      ? side === "w"
+        ? beforeProbe.mate
+        : -beforeProbe.mate
+      : undefined;
+
+  if ((isSacrifice || (isCheck && cpLoss <= 20)) && cpLoss <= 24) {
+    return { label: "Brilliant", color: "text-[#14b8a6] font-semibold", cpLoss, bestMove: bestMoveUci };
+  }
+  // Missed win: the side was clearly winning (or had a forced mate) and let
+  // most of that advantage slip. Flagged distinctly from a plain mistake.
+  if (
+    cpLoss >= 130 &&
+    ((beforeForSide >= 250 && afterForSide < 120) ||
+      (beforeMateForSide !== undefined && beforeMateForSide > 0))
+  ) {
+    return { label: "Miss", color: "text-[#f97316]", cpLoss, bestMove: bestMoveUci };
+  }
+  // Great: the precise, often only move that holds a difficult or worse
+  // position together (matches the engine's top choice while under pressure).
+  if (isBest && beforeForSide <= -40 && cpLoss <= 15) {
+    return { label: "Great", color: "text-[#1d4ed8]", cpLoss, bestMove: bestMoveUci };
+  }
+  if (isBest || cpLoss <= 10) {
     return { label: "Best", color: "text-foreground", cpLoss, bestMove: bestMoveUci };
   }
-  if ((isSacrifice || (isCheck && cpLoss <= 15)) && cpLoss <= 20) {
-    return { label: "Brilliant", color: "text-foreground font-semibold", cpLoss, bestMove: bestMoveUci };
-  }
-  if (isCheck && cpLoss <= 22) {
-    return { label: "Great", color: "text-foreground/90", cpLoss, bestMove: bestMoveUci };
-  }
-  if (cpLoss <= 25) {
+  if (cpLoss <= 30) {
     return { label: "Excellent", color: "text-muted-foreground", cpLoss, bestMove: bestMoveUci };
   }
-  if (cpLoss <= 45) {
+  if (cpLoss <= 60) {
     return { label: "Good", color: "text-muted-foreground/90", cpLoss, bestMove: bestMoveUci };
   }
-  if (cpLoss <= 90) {
+  if (cpLoss <= 110) {
     return { label: "Inaccuracy", color: "text-foreground/70", cpLoss, bestMove: bestMoveUci };
   }
-  // "Miss" = missed tactical/strategic chance, between inaccuracy and full blunder.
-  if (cpLoss <= 140 && !isCapture) {
-    return { label: "Miss", color: "text-foreground/65", cpLoss, bestMove: bestMoveUci };
-  }
-  if (cpLoss <= 180) {
+  if (cpLoss <= 190) {
     return { label: "Mistake", color: "text-foreground/55", cpLoss, bestMove: bestMoveUci };
   }
   return { label: "Blunder", color: "text-destructive", cpLoss, bestMove: bestMoveUci };

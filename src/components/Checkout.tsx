@@ -52,7 +52,7 @@ export default function Checkout({ productId, onClose }: CheckoutProps) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
       throw err
     }
-  }, [productId, user?.email, user?.id])
+  }, [productId, user?.email])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
