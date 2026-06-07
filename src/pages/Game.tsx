@@ -4,9 +4,10 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  ChevronFirst,
+  ChevronLast,
   RotateCcw,
   History,
-  Trophy,
   User,
   Bot,
   Loader2,
@@ -36,7 +37,6 @@ import { attackedSquares, findPins, legalOrControlledMoves } from "@/lib/chess-f
 import { probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
 import {
   type CoachId,
-  coachOnMoveRating,
   coachOnEval,
   COACHES,
 } from "@/lib/philosopher-coaches";
@@ -47,15 +47,39 @@ import {
   scoreForLabel,
   type ReviewedPly,
 } from "@/lib/game-review";
+import { describeGameTermination } from "@/lib/game-termination";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 const DIFFICULTY_LEVELS = [
-  { label: "Beginner", skill: 1, depth: 4, rating: "~400" },
-  { label: "Easy", skill: 5, depth: 6, rating: "~800" },
-  { label: "Medium", skill: 10, depth: 10, rating: "~1200" },
-  { label: "Hard", skill: 15, depth: 14, rating: "~1600" },
-  { label: "Expert", skill: 18, depth: 16, rating: "~2000" },
-  { label: "Master", skill: 20, depth: 20, rating: "~2500" },
+  { label: "Beginner", skill: 0, depth: 2, rating: "~250" },
+  { label: "Easy", skill: 2, depth: 3, rating: "~500" },
+  { label: "Medium", skill: 4, depth: 5, rating: "~850" },
+  { label: "Hard", skill: 7, depth: 7, rating: "~1150" },
+  { label: "Expert", skill: 10, depth: 9, rating: "~1500" },
+  { label: "Master", skill: 14, depth: 12, rating: "~1850" },
 ];
+const ENGINE_MOVE_DELAY_MS = 180;
+const EVAL_UPDATE_INTERVAL_MS = 120;
+
+// Default per-player clock for the chess.com-style player banners. Practice
+// games versus Stockfish have no enforced time control, so the clocks are a
+// cosmetic 10-minute countdown that simply pauses at 0 (it never flags / ends
+// the game) and visually indicates whose turn it is.
+const PRACTICE_CLOCK_MS = 10 * 60 * 1000;
+
+type SidebarTab = "moves" | "players" | "chat";
+type ChatMessage = { id: number; author: string; text: string };
+
+const DAILY_MOVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const PREMOVE_STORAGE_KEY = "plato:premove-enabled";
+const PREMOVE_QUEUE_STORAGE_KEY = "plato:queued-premove";
+type QueuedPremove = {
+  from: Square;
+  to: Square;
+  promotion?: string;
+};
 
 function parseCoachId(raw: string | null): CoachId {
   const r = (raw || "").toLowerCase();
@@ -75,12 +99,33 @@ function getSquareFromPoint(boardEl: HTMLElement, clientX: number, clientY: numb
   return `${String.fromCharCode(97 + col)}${8 - row}` as Square;
 }
 
+function summarizeResultLabel(result: string): string {
+  const normalized = result.toLowerCase();
+  if (normalized.includes("checkmate")) return "Checkmate";
+  if (normalized.includes("stalemate")) return "Stalemate";
+  if (normalized.includes("draw")) return "Draw";
+  return "Game over";
+}
+
+function eloPulseForResult(result: string, skillLevel: number): number {
+  const baseSwing = Math.max(8, Math.round(8 + skillLevel * 0.65));
+  if (result.startsWith("White wins")) return baseSwing;
+  if (result.startsWith("Black wins")) return -Math.max(6, Math.round(baseSwing * 0.8));
+  return 0;
+}
+
 const Game = () => {
+  const { user } = useAuth();
+  const { showValidMoves } = useTheme();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const difficultyParam = parseInt(searchParams.get("level") || "2");
+  const modeParam = (searchParams.get("mode") || "practice").toLowerCase();
+  const isPracticeMode = modeParam !== "online";
   const difficulty = DIFFICULTY_LEVELS[Math.min(difficultyParam, DIFFICULTY_LEVELS.length - 1)];
   const coach = parseCoachId(searchParams.get("coach"));
+  const mode = parseGameMode(searchParams.get("mode"));
+  const isDailyMode = mode === "daily";
   const [coachLine, setCoachLine] = useState<string | null>(null);
 
   // Time control (minutes + Fischer increment seconds, defaults to 10|0).
@@ -96,10 +141,6 @@ const Game = () => {
   const [moveHistory, setMoveHistory] = useState<
     { san: string; rating?: { label: string; color: string }; cpLoss?: number; bestUci?: string }[]
   >([]);
-  const [reviewingGame, setReviewingGame] = useState(false);
-  const [reviewProgress, setReviewProgress] = useState(0);
-  const [reviewSummary, setReviewSummary] = useState<string | null>(null);
-  const [reviewReady, setReviewReady] = useState(false);
   const [eval_, setEval_] = useState<number>(0);
   const [evalMate, setEvalMate] = useState<number | null>(null);
   const [evalDepth, setEvalDepth] = useState(0);
@@ -125,6 +166,8 @@ const Game = () => {
   } | null>(null);
   const [dragOver, setDragOver] = useState<Square | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  const gameOverActionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const lastEvalUiUpdateRef = useRef(0);
 
   const engineRef = useRef<StockfishEngine | null>(null);
   const gameRef = useRef(game);
@@ -138,12 +181,105 @@ const Game = () => {
 
   const allLegalDestinations = useMemo(() => {
     const s = new Set<Square>();
-    if (game.turn() !== "w" || game.isGameOver() || viewFen) return s;
+    if (gameTurn !== "w" || gameIsOver || viewFen) return s;
     for (const m of game.moves({ verbose: true })) {
       if (m.color === "w") s.add(m.to as Square);
     }
     return s;
-  }, [game, viewFen]);
+  }, [game, gameTurn, gameIsOver, viewFen]);
+
+  const clearQueuedPremove = useCallback(() => {
+    setQueuedPremove(null);
+    localStorage.removeItem(PREMOVE_QUEUE_STORAGE_KEY);
+  }, []);
+
+  const queuePremove = useCallback((move: QueuedPremove) => {
+    setQueuedPremove(move);
+    localStorage.setItem(PREMOVE_QUEUE_STORAGE_KEY, JSON.stringify(move));
+    toast.message("Premove queued.");
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    supabase
+      .from("profiles")
+      .select("premove_enabled, rating")
+      .eq("user_id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        const enabled = data?.premove_enabled ?? true;
+        setPremoveEnabled(enabled);
+        localStorage.setItem(PREMOVE_STORAGE_KEY, JSON.stringify(enabled));
+        if (typeof data?.rating === "number") setPlayerElo(data.rating);
+      });
+  }, [user]);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== PREMOVE_STORAGE_KEY) return;
+      setPremoveEnabled(event.newValue !== "false");
+    };
+    const handleDisabled = () => {
+      setPremoveEnabled(false);
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("plato:premove-disabled", handleDisabled);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("plato:premove-disabled", handleDisabled);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!premoveEnabled) {
+      clearQueuedPremove();
+      setSelectedSquare(null);
+      setValidMoves([]);
+    }
+  }, [clearQueuedPremove, premoveEnabled]);
+
+  useEffect(() => {
+    if (!isDailyMode || gameOver) {
+      setDailyMoveDeadlineMs(null);
+      return;
+    }
+    const nextDeadline = Date.now() + DAILY_MOVE_WINDOW_MS;
+    setDailyMoveDeadlineMs(nextDeadline);
+    setDailyClockMs(DAILY_MOVE_WINDOW_MS);
+  }, [gameTurn, gameOver, isDailyMode]);
+
+  useEffect(() => {
+    if (!isDailyMode || !dailyMoveDeadlineMs || gameOver) return;
+
+    const tick = () => {
+      const remaining = dailyMoveDeadlineMs - Date.now();
+      setDailyClockMs(Math.max(0, remaining));
+      if (remaining <= 0) {
+        setGameOver(game.turn() === "w" ? "White flagged on time." : "Black flagged on time.");
+      }
+    };
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [dailyMoveDeadlineMs, game, gameOver, isDailyMode]);
+
+  // Cosmetic per-player countdown that ticks for whoever is on the move. It
+  // never flags the game (just clamps at 0) so it cannot interfere with the
+  // practice-vs-engine flow; it only signals whose turn it is. Daily mode keeps
+  // its own dedicated 24h-per-move clock instead.
+  useEffect(() => {
+    if (isDailyMode || gameOver || viewFen || gameIsOver) return;
+    const interval = window.setInterval(() => {
+      if (gameTurn === "w") {
+        setWhiteClockMs((ms) => Math.max(0, ms - 1000));
+      } else {
+        setBlackClockMs((ms) => Math.max(0, ms - 1000));
+      }
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [gameTurn, gameOver, viewFen, gameIsOver, isDailyMode]);
 
   // --- Material + captured pieces (derived from the displayed position) ---
   const material = useMemo(() => computeMaterial(displayFen), [displayFen]);
@@ -188,13 +324,20 @@ const Game = () => {
     return () => engine.destroy();
   }, [difficulty.skill]);
 
-  // Run eval (skip while Stockfish is searching a move - avoids canceling / corrupting `getBestMove`)
+  // Eval is computed for the coach, for board scrubbing, and once the game has
+  // concluded (so the bar can be revealed). It is intentionally NOT surfaced to
+  // the user while a game is actively in progress (spec Section 1).
+  const liveEvalNeeded = isPracticeMode || coach !== "none" || !!viewFen || !!gameOver;
   useEffect(() => {
+    if (!liveEvalNeeded) return;
     if (!engineReady || !engineRef.current || engineError) return;
     const fen = viewFen || gameFen;
     const side = new Chess(fen).turn();
     if (!viewFen && side === "b") return;
     engineRef.current.evaluate(fen, 18, (info: StockfishInfo) => {
+      const now = performance.now();
+      const shouldRefreshUi = now - lastEvalUiUpdateRef.current >= EVAL_UPDATE_INTERVAL_MS;
+      if (!shouldRefreshUi) return;
       if (info.mate !== undefined) {
         setEvalMate(info.mate);
         setEval_(info.mate > 0 ? 2000 : -2000);
@@ -202,9 +345,10 @@ const Game = () => {
         setEvalMate(null);
         setEval_(info.score);
       }
-      if (info.depth) setEvalDepth(info.depth);
+      lastEvalUiUpdateRef.current = now;
+      lastEvalUiUpdateRef.current = now;
     });
-  }, [gameFen, viewFen, engineReady, engineError]);
+  }, [gameFen, viewFen, engineReady, engineError, isPracticeMode, liveEvalNeeded]);
 
   // --- Clock wiring ---
   useEffect(() => {
@@ -276,7 +420,7 @@ const Game = () => {
       const timer = setTimeout(makeEngineMove, 320);
       return () => clearTimeout(timer);
     }
-  }, [game, gameTurn, gameIsOver, engineReady, engineError, engineThinking, makeEngineMove]);
+  }, [gameTurn, gameIsOver, engineReady, engineError, engineThinking, makeEngineMove]);
 
   useEffect(() => {
     if (coach === "none") return;
@@ -284,7 +428,6 @@ const Game = () => {
       setCoachLine("I am ready. Play with intention, and I will annotate the ideas behind each move.");
       return;
     }
-    if (reviewingGame) return;
     const last = moveHistory[moveHistory.length - 1];
     setCoachLine(coachOnEval(coach, eval_, evalMate, last?.san ?? null, moveHistory.length * 13));
   }, [coach, moveHistory, eval_, evalMate, reviewingGame]);
@@ -313,11 +456,64 @@ const Game = () => {
     [coach, eval_, evalMate, game, applyIncrement],
   );
 
+  useEffect(() => {
+    if (!queuedPremove || game.turn() !== "w" || engineThinking || gameOver || !premoveEnabled) return;
+
+    const queuedMove = queuedPremove;
+    clearQueuedPremove();
+    const played = executeMove(queuedMove.from, queuedMove.to, queuedMove.promotion);
+    if (played) {
+      toast.success("Queued premove played.");
+    } else {
+      toast.message("Queued premove cleared because it was no longer legal.");
+    }
+  }, [
+    clearQueuedPremove,
+    engineThinking,
+    executeMove,
+    game,
+    gameOver,
+    premoveEnabled,
+    queuedPremove,
+  ]);
+
+  useEffect(() => {
+    if (!isDailyMode || gameOver) return;
+    if (game.turn() === "w") {
+      toast.message("Daily mode: your move window has started.");
+    }
+  }, [gameTurn, gameOver, isDailyMode, game]);
+
   const handleSquareClick = (square: Square) => {
     if (game.turn() !== "w" || engineThinking || gameOver || viewFen) return;
     if (dragging) return;
 
     const piece = game.get(square);
+
+    if (game.turn() !== "w") {
+      if (!premoveEnabled) return;
+
+      if (selectedSquare) {
+        if (selectedSquare === square) {
+          setSelectedSquare(null);
+          return;
+        }
+        queuePremove({ from: selectedSquare, to: square });
+        setSelectedSquare(null);
+        setValidMoves([]);
+        return;
+      }
+
+      if (piece && piece.color === "w") {
+        setSelectedSquare(square);
+      } else {
+        setSelectedSquare(null);
+      }
+      setValidMoves([]);
+      return;
+    }
+
+    if (engineThinking) return;
 
     if (selectedSquare) {
       const isValid = validMoves.includes(square);
@@ -419,7 +615,7 @@ const Game = () => {
     };
   }, [dragging, executeMove, game, validMoves]);
 
-  const resetGame = () => {
+  const resetGame = useCallback(() => {
     setGame(new Chess());
     setSelectedSquare(null);
     setValidMoves([]);
@@ -449,14 +645,21 @@ const Game = () => {
     setValidMoves([]);
   };
 
+  const goToStart = () => {
+    if (totalPlies === 0) return;
+    setViewFen(new Chess().fen());
+    setHistoryIndex(-1);
+  };
+
+  const goToLast = () => {
+    setViewFen(null);
+    setHistoryIndex(-1);
+  };
+
   const goBack = () => {
-    const fullHistory = game.history();
-    const current = historyIndex === -1 ? fullHistory.length - 1 : historyIndex - 1;
-    if (current >= 0) goToMove(current);
-    else {
-      setViewFen(new Chess().fen());
-      setHistoryIndex(-1);
-    }
+    const target = currentPly - 1;
+    if (target <= 0) goToStart();
+    else goToMove(target - 1);
   };
 
   const goForward = () => {
@@ -547,7 +750,52 @@ const Game = () => {
     } finally {
       setReviewingGame(false);
     }
-  }, [coach, engineLabel, game, gameOver, reviewingGame]);
+  }, [eval_, gameOver]);
+
+  const sendChat = () => {
+    const text = chatDraft.trim();
+    if (!text) return;
+    setChatMessages((prev) => [
+      ...prev,
+      { id: Date.now(), author: "You", text },
+    ]);
+    setChatDraft("");
+  };
+
+  // A single move cell in the sidebar move log. Highlights with a distinct
+  // background when it is the position currently shown on the board.
+  const renderMoveCell = (
+    move: { san: string; rating?: { label: string; color: string } } | undefined,
+    ply: number
+  ) => {
+    if (!move) return <div />;
+    const active = historyIndex === ply;
+    const toneText = move.rating?.label
+      ? reviewTone(move.rating.label).text
+      : "text-gray-200";
+    return (
+      <button
+        type="button"
+        onClick={() => goToMove(ply)}
+        className={`flex items-center gap-1.5 px-3 py-2 text-left font-body text-sm transition-colors ${
+          active
+            ? "bg-cc-green font-semibold text-white"
+            : `hover:bg-white/5 ${toneText}`
+        }`}
+      >
+        <span>{move.san}</span>
+        {move.rating?.label && (
+          <span
+            className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${reviewTone(
+              move.rating.label
+            ).chip}`}
+          >
+            {move.rating.label}
+          </span>
+        )}
+      </button>
+    );
+  };
 
   const evalText =
     evalMate != null ? `${evalMate > 0 ? "" : "-"}M${Math.abs(evalMate)}` : eval_ >= 0 ? `+${(eval_ / 100).toFixed(1)}` : (eval_ / 100).toFixed(1);
@@ -562,6 +810,98 @@ const Game = () => {
         ? "Your turn (White)"
         : "Black to move";
 
+  const eloPulse = useMemo(
+    () => (gameOver ? eloPulseForResult(gameOver, difficulty.skill) : 0),
+    [difficulty.skill, gameOver]
+  );
+  const resultSummary = useMemo(
+    () =>
+      gameOver
+        ? `${summarizeResultLabel(gameOver)} - ${eloPulse > 0 ? `+${eloPulse}` : `${eloPulse}`} Elo`
+        : null,
+    [eloPulse, gameOver]
+  );
+  const gameOutcome = useMemo(() => {
+    if (!gameOver) return "Game complete";
+    if (gameOver.startsWith("White wins")) return "Victory";
+    if (gameOver.startsWith("Black wins")) return "Defeat";
+    return "Draw";
+  }, [gameOver]);
+
+  const handleAnalyzeAction = useCallback(() => {
+    if (!gameOver) return;
+    navigate("/analyze", {
+      state: {
+        pgn: game.pgn(),
+        source: "end-of-game-overlay",
+      },
+    });
+  }, [game, gameOver, navigate]);
+
+  const handleNewOpponentAction = useCallback(() => {
+    navigate("/play");
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!gameOver) return;
+    const focusFirstAction = requestAnimationFrame(() => {
+      gameOverActionRefs.current[0]?.focus();
+    });
+
+    const onOverlayKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "a") {
+        event.preventDefault();
+        handleAnalyzeAction();
+        return;
+      }
+      if (key === "r") {
+        event.preventDefault();
+        resetGame();
+        return;
+      }
+      if (key === "n") {
+        event.preventDefault();
+        handleNewOpponentAction();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const actions = gameOverActionRefs.current.filter(
+        (btn): btn is HTMLButtonElement => Boolean(btn)
+      );
+      if (!actions.length) return;
+
+      event.preventDefault();
+      const currentIndex = actions.findIndex((btn) => btn === document.activeElement);
+      if (currentIndex === -1) {
+        actions[0].focus();
+        return;
+      }
+      const delta = event.shiftKey ? -1 : 1;
+      const nextIndex = (currentIndex + delta + actions.length) % actions.length;
+      actions[nextIndex].focus();
+    };
+
+    window.addEventListener("keydown", onOverlayKeyDown);
+    return () => {
+      cancelAnimationFrame(focusFirstAction);
+      window.removeEventListener("keydown", onOverlayKeyDown);
+    };
+  }, [gameOver, handleAnalyzeAction, handleNewOpponentAction, resetGame]);
+
+  // The evaluation bar is strictly hidden during the active game across all modes
+  // and is only revealed once the game has completely concluded (spec Section 1).
+  const showEvalBar = !!gameOver;
   return (
     <div className="min-h-screen bg-background">
       {/* Top nav */}
@@ -569,13 +909,14 @@ const Game = () => {
         <div className="container mx-auto flex items-center gap-4 px-6 py-4">
           <Link
             to="/play"
-            className="flex items-center gap-2 font-body text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-2 font-body text-sm text-gray-400 transition-colors hover:text-gray-100"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
           </Link>
-          <h1 className="font-display text-xl font-semibold">
-            vs <span className="text-gradient-brand">Stockfish</span>
+          <h1 className="font-display text-lg font-semibold text-gray-100 sm:text-xl">
+            {isDailyMode ? "Daily" : "Practice"}{" "}
+            <span className="text-cc-green">vs Stockfish</span>
           </h1>
           <span className="ml-auto rounded-full border border-border px-3 py-1 font-body text-xs text-muted-foreground">
             {difficulty.label} ({difficulty.rating})
@@ -951,7 +1292,7 @@ const Game = () => {
             )}
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 };
