@@ -69,11 +69,27 @@ export default {
         "warm-gray": "hsl(var(--warm-gray))",
         "chess-light": "hsl(var(--chess-light))",
         "chess-dark": "hsl(var(--chess-dark))",
+        glyph: {
+          brilliant: "#26c2a3",
+          great: "#5b8baf",
+          best: "#81b64c",
+          excellent: "#95b776",
+          good: "#7a9b6a",
+          book: "#a88865",
+          inaccuracy: "#f7c045",
+          mistake: "#e58f2a",
+          blunder: "#ca3431",
+          miss: "#ee6b55",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      boxShadow: {
+        soft: "0 2px 14px -4px hsl(0 0% 0% / 0.45)",
+        panel: "0 12px 42px -14px hsl(0 0% 0% / 0.6)",
       },
       keyframes: {
         "accordion-down": {
