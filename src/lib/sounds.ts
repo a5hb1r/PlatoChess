@@ -1,12 +1,23 @@
-// Crisp board SFX (Web Audio). Styled like popular sites - not sampled from third"party assets.
+/**
+ * Chess board SFX.
+ *
+ * Two-tier audio system:
+ *  1. MP3 file playback — drop real sound files into /public/sounds/*.mp3
+ *     (see SOUND_FILE_PATHS below for the exact expected filenames).
+ *     Files are pre-warmed on the first user gesture and cached in memory.
+ *  2. Web Audio synthesis fallback — if a file is missing or fails to load
+ *     the synthesised burst plays instead (zero extra dependencies).
+ *
+ * Call `preloadSounds()` once after the first user interaction (already wired
+ * via `installAudioUnlockListeners`).
+ */
 import type { Move } from "chess.js";
 
 let ctx: AudioContext | null = null;
 
 export const SOUND_STORAGE_KEY = "platochess-sound-enabled";
 
-/** Global mute switch for all board SFX. Read once from storage so playback is
- *  correct even before the React settings provider mounts. */
+/** Global mute switch for all board SFX. Read once from storage. */
 let soundEnabled = (() => {
   if (typeof localStorage === "undefined") return true;
   try {
@@ -29,11 +40,16 @@ export function areSoundsEnabled(): boolean {
   return soundEnabled;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Audio context helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
 /** Browsers suspend AudioContext until a user gesture; call once on app mount. */
 export function installAudioUnlockListeners(): void {
   if (typeof window === "undefined") return;
   const unlock = () => {
     void resumeAudioContext();
+    void preloadSounds();
   };
   window.addEventListener("pointerdown", unlock, { passive: true, once: true });
   window.addEventListener("keydown", unlock, { passive: true, once: true });
@@ -49,6 +65,98 @@ function getCtx(): AudioContext {
   void ctx.resume();
   return ctx;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MP3 file loading + cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Drop your chess sound MP3/OGG files here → /public/sounds/<name>
+ * Files are fetched once and cached; missing files silently fall back to
+ * synthesised audio.
+ */
+export const SOUND_FILE_PATHS = {
+  move: "/sounds/move.mp3",
+  capture: "/sounds/capture.mp3",
+  check: "/sounds/check.mp3",
+  castle: "/sounds/castle.mp3",
+  gameOver: "/sounds/game-over.mp3",
+  promote: "/sounds/promote.mp3",
+  brilliant: "/sounds/brilliant.mp3",
+  blunder: "/sounds/blunder.mp3",
+  illegal: "/sounds/illegal.mp3",
+} as const;
+
+type SoundKey = keyof typeof SOUND_FILE_PATHS;
+
+const soundFileCache = new Map<SoundKey, AudioBuffer | null>();
+
+async function fetchAndCacheSound(key: SoundKey): Promise<AudioBuffer | null> {
+  if (soundFileCache.has(key)) return soundFileCache.get(key) ?? null;
+  const path = SOUND_FILE_PATHS[key];
+  try {
+    const response = await fetch(path, { cache: "force-cache" });
+    if (!response.ok) {
+      soundFileCache.set(key, null);
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const c = getCtx();
+    const audioBuffer = await c.decodeAudioData(arrayBuffer);
+    soundFileCache.set(key, audioBuffer);
+    return audioBuffer;
+  } catch {
+    soundFileCache.set(key, null);
+    return null;
+  }
+}
+
+/** Pre-warm the cache after first user gesture so playback is instant. */
+export async function preloadSounds(): Promise<void> {
+  await Promise.all(
+    (Object.keys(SOUND_FILE_PATHS) as SoundKey[]).map((key) =>
+      fetchAndCacheSound(key).catch(() => null)
+    )
+  );
+}
+
+function playCachedBuffer(buffer: AudioBuffer, volume = 0.85): void {
+  if (!soundEnabled) return;
+  const c = getCtx();
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  const g = c.createGain();
+  g.gain.setValueAtTime(volume, c.currentTime);
+  src.connect(g).connect(c.destination);
+  src.start();
+}
+
+/**
+ * Tries the cached MP3 file first; if absent, runs the `fallback` synthesiser.
+ * Non-blocking — the async fetch is fire-and-forget on first call (the
+ * pre-warm should have already done it).
+ */
+function playFileOrFallback(key: SoundKey, fallback: () => void): void {
+  if (!soundEnabled) return;
+  const cached = soundFileCache.get(key);
+  if (cached === undefined) {
+    // Not yet fetched — fire async but play synth immediately so there's no
+    // gap on the very first move.
+    fallback();
+    void fetchAndCacheSound(key);
+    return;
+  }
+  if (cached === null) {
+    // File doesn't exist — always use fallback.
+    fallback();
+    return;
+  }
+  playCachedBuffer(cached);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Synthesised fallbacks (Web Audio API)
+// ─────────────────────────────────────────────────────────────────────────────
 
 const MIN_GAIN = 0.0001;
 
@@ -122,7 +230,11 @@ function playTone(
   osc.stop(t + duration);
 }
 
-/** Use after chess.js `move()` - matches move type to the closest "site-style" feedback. */
+// ─────────────────────────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Use after chess.js `move()` — matches move type to the closest audio event. */
 export function playMoveSound(move: Move, sideToMoveAfterMoveInCheck: boolean) {
   if (sideToMoveAfterMoveInCheck) {
     ChessSounds.check();
@@ -144,48 +256,77 @@ export function playMoveSound(move: Move, sideToMoveAfterMoveInCheck: boolean) {
 }
 
 export const ChessSounds = {
-  /** Quiet slide - short "knock" */
   move() {
-    playNoiseBurst(1200, 0.028, 0.14, 2.2);
-    playNoiseBurst(420, 0.022, 0.1, 1.2, 0.004);
-    playTone(180, 0.022, "sine", 0.045);
+    playFileOrFallback("move", () => {
+      playNoiseBurst(1200, 0.028, 0.14, 2.2);
+      playNoiseBurst(420, 0.022, 0.1, 1.2, 0.004);
+      playTone(180, 0.022, "sine", 0.045);
+    });
   },
 
-  /** Heavier transient + scrape */
   capture() {
-    playNoiseBurst(520, 0.055, 0.32, 1.4);
-    playNoiseBurst(1400, 0.035, 0.16, 2.8, 0.01);
-    playTone(95, 0.06, "triangle", 0.11);
+    playFileOrFallback("capture", () => {
+      playNoiseBurst(520, 0.055, 0.32, 1.4);
+      playNoiseBurst(1400, 0.035, 0.16, 2.8, 0.01);
+      playTone(95, 0.06, "triangle", 0.11);
+    });
   },
 
-  /** Bright alert */
   check() {
-    playTone(740, 0.055, "sine", 0.16);
-    playTone(990, 0.07, "sine", 0.14, 0.05);
+    playFileOrFallback("check", () => {
+      playTone(740, 0.055, "sine", 0.16);
+      playTone(990, 0.07, "sine", 0.14, 0.05);
+    });
   },
 
-  /** Two quick taps */
   castle() {
-    playNoiseBurst(1100, 0.024, 0.15, 2.2);
-    playNoiseBurst(900, 0.026, 0.18, 2, 0.045);
-    playTone(240, 0.02, "sine", 0.04, 0.055);
+    playFileOrFallback("castle", () => {
+      playNoiseBurst(1100, 0.024, 0.15, 2.2);
+      playNoiseBurst(900, 0.026, 0.18, 2, 0.045);
+      playTone(240, 0.02, "sine", 0.04, 0.055);
+    });
   },
 
   gameOver() {
-    playTone(587, 0.18, "sine", 0.11);
-    playTone(440, 0.2, "sine", 0.09, 0.14);
-    playTone(330, 0.32, "sine", 0.08, 0.28);
+    playFileOrFallback("gameOver", () => {
+      playTone(587, 0.18, "sine", 0.11);
+      playTone(440, 0.2, "sine", 0.09, 0.14);
+      playTone(330, 0.32, "sine", 0.08, 0.28);
+    });
   },
 
   promote() {
-    playTone(523, 0.06, "sine", 0.1);
-    playTone(659, 0.06, "sine", 0.09, 0.05);
-    playTone(784, 0.08, "sine", 0.1, 0.1);
-    playTone(1047, 0.12, "sine", 0.11, 0.16);
+    playFileOrFallback("promote", () => {
+      playTone(523, 0.06, "sine", 0.1);
+      playTone(659, 0.06, "sine", 0.09, 0.05);
+      playTone(784, 0.08, "sine", 0.1, 0.1);
+      playTone(1047, 0.12, "sine", 0.11, 0.16);
+    });
+  },
+
+  /** Distinct celebratory sound for a Brilliant move classification. */
+  brilliant() {
+    playFileOrFallback("brilliant", () => {
+      playTone(880, 0.04, "sine", 0.12);
+      playTone(1108, 0.04, "sine", 0.1, 0.06);
+      playTone(1318, 0.06, "sine", 0.12, 0.11);
+      playTone(1760, 0.1, "sine", 0.1, 0.16);
+    });
+  },
+
+  /** Low, ominous sound for a Blunder classification. */
+  blunder() {
+    playFileOrFallback("blunder", () => {
+      playTone(220, 0.18, "sawtooth", 0.09);
+      playTone(165, 0.22, "sawtooth", 0.07, 0.12);
+      playTone(110, 0.28, "square", 0.05, 0.25);
+    });
   },
 
   illegal() {
-    playTone(165, 0.12, "square", 0.07);
-    playTone(130, 0.16, "square", 0.05, 0.08);
+    playFileOrFallback("illegal", () => {
+      playTone(165, 0.12, "square", 0.07);
+      playTone(130, 0.16, "square", 0.05, 0.08);
+    });
   },
 };

@@ -51,6 +51,8 @@ import {
   saveLatestFinishedGame,
   saveLatestGameReview,
   scoreForLabel,
+  appendToGameHistory,
+  updateGameHistoryAccuracy,
   type ReviewedPly,
 } from "@/lib/game-review";
 import { describeGameTermination } from "@/lib/game-termination";
@@ -240,6 +242,9 @@ const Game = () => {
   const boardRef = useRef<HTMLDivElement>(null);
   const gameOverActionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const lastEvalUiUpdateRef = useRef(0);
+  // Stable ID for this game session — used to correlate the history entry when
+  // accuracy data is added later during the review step.
+  const gameHistoryIdRef = useRef<string>(`game-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   const engineRef = useRef<StockfishEngine | null>(null);
   const gameRef = useRef(game);
@@ -428,13 +433,31 @@ const Game = () => {
 
   useEffect(() => {
     if (!gameOver || game.history().length === 0) return;
+    const now = Date.now();
     saveLatestFinishedGame({
-      createdAt: Date.now(),
+      createdAt: now,
       pgn: game.pgn(),
       result: gameOver,
       engine: engineLabel,
     });
-  }, [engineLabel, game, gameOver]);
+
+    // Derive a canonical outcome for the history entry.
+    const resultOutcome: "win" | "loss" | "draw" =
+      gameOver.startsWith("White wins") ? "win"
+      : gameOver.startsWith("Black wins") ? "loss"
+      : "draw";
+
+    appendToGameHistory({
+      id: gameHistoryIdRef.current,
+      createdAt: now,
+      opponent: namedBot ? namedBot.name : `Stockfish ${difficulty.label}`,
+      result: resultOutcome,
+      resultDetail: gameOver,
+      moveCount: game.history().length,
+      accuracy: null,
+      pgn: game.pgn(),
+    });
+  }, [engineLabel, game, gameOver, difficulty.label, namedBot]);
 
   // Stockfish plays black
   const makeEngineMove = useCallback(async () => {
@@ -866,15 +889,18 @@ const Game = () => {
       const bySide = { w: [] as number[], b: [] as number[] };
       for (const m of reviewedPlies) bySide[m.side].push(scoreForLabel(m.label));
       const avg = (a: number[]) => (a.length ? (a.reduce((s, x) => s + x, 0) / a.length) * 100 : 0);
+      const accuracy = { w: Number(avg(bySide.w).toFixed(1)), b: Number(avg(bySide.b).toFixed(1)) };
       saveLatestGameReview({
         createdAt: Date.now(),
         pgn: game.pgn(),
         result: gameOver || "Game complete",
         engine: engineLabel,
         depth: 10,
-        accuracy: { w: Number(avg(bySide.w).toFixed(1)), b: Number(avg(bySide.b).toFixed(1)) },
+        accuracy,
         moves: reviewedPlies,
       });
+      // Persist accuracy into the game history entry created when the game ended.
+      updateGameHistoryAccuracy(gameHistoryIdRef.current, accuracy);
       if (coach !== "none") setCoachLine(coachOnMoveRating(coach, "Good", "analysis", Date.now()));
     } finally {
       setReviewingGame(false);
@@ -885,6 +911,35 @@ const Game = () => {
     evalMate != null ? `${evalMate > 0 ? "" : "-"}M${Math.abs(evalMate)}` : eval_ >= 0 ? `+${(eval_ / 100).toFixed(1)}` : (eval_ / 100).toFixed(1);
 
   const moveListEntries = moveHistory.map((m) => ({ san: m.san, label: m.rating?.label }));
+
+  /**
+   * Cumulative move-classification counters — derived from whatever ratings are
+   * currently in moveHistory (populated live during the review pass).
+   */
+  const moveCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const m of moveHistory) {
+      const label = m.rating?.label;
+      if (label) counts[label] = (counts[label] || 0) + 1;
+    }
+    return counts;
+  }, [moveHistory]);
+
+  // Ordered summary rows shown in the sidebar move-stats strip.
+  const MOVE_STATS_ORDER = [
+    { label: "Brilliant", dot: "bg-[#26c2a3]" },
+    { label: "Great", dot: "bg-[#5b8baf]" },
+    { label: "Best", dot: "bg-[#81b64c]" },
+    { label: "Excellent", dot: "bg-[#95b776]" },
+    { label: "Good", dot: "bg-[#7a9b6a]" },
+    { label: "Book", dot: "bg-[#a88865]" },
+    { label: "Inaccuracy", dot: "bg-[#f7c045]" },
+    { label: "Miss", dot: "bg-[#ee6b55]" },
+    { label: "Mistake", dot: "bg-[#e58f2a]" },
+    { label: "Blunder", dot: "bg-[#ca3431]" },
+  ] as const;
+
+  const moveStatsVisible = reviewReady && moveHistory.some((m) => m.rating?.label);
 
   const statusText = gameOver
     ? gameOver
@@ -1056,7 +1111,7 @@ const Game = () => {
           </Link>
           <h1 className="font-display text-lg font-semibold text-gray-100 sm:text-xl">
             {isDailyMode ? "Daily" : "Practice"}{" "}
-            <span className="text-cc-green">vs Stockfish</span>
+            <span className="text-primary">vs Stockfish</span>
           </h1>
           <span className="ml-auto rounded-full border border-border px-3 py-1 font-body text-xs text-muted-foreground">
             {difficulty.label} ({difficulty.rating})
@@ -1238,67 +1293,138 @@ const Game = () => {
                     )}
                   </AnimatePresence>
 
-                  {/* Game over overlay */}
+                  {/* Game over overlay — Chess.com-style result modal */}
                   <AnimatePresence>
                     {gameOver && (
                       <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-background/92 backdrop-blur-md px-6"
+                        className="absolute inset-0 z-50 flex items-center justify-center bg-background/90 backdrop-blur-md"
                       >
-                        <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.1 }}>
-                          <Trophy className={`h-14 w-14 ${gameOver.startsWith("White wins") ? "text-amber-400" : gameOver.startsWith("Black wins") ? "text-rose-400" : "text-foreground/50"}`} />
+                        <motion.div
+                          initial={{ scale: 0.88, opacity: 0, y: 12 }}
+                          animate={{ scale: 1, opacity: 1, y: 0 }}
+                          exit={{ scale: 0.88, opacity: 0 }}
+                          transition={{ type: "spring", stiffness: 340, damping: 26 }}
+                          className="mx-4 w-full max-w-[340px] overflow-hidden rounded-2xl border border-border bg-card shadow-panel"
+                        >
+                          {/* Coloured result banner */}
+                          <div
+                            className={`flex items-center justify-center gap-3 px-6 py-5 ${
+                              gameOver.startsWith("White wins")
+                                ? "bg-emerald-500/15 border-b border-emerald-500/25"
+                                : gameOver.startsWith("Black wins")
+                                  ? "bg-rose-500/15 border-b border-rose-500/25"
+                                  : "bg-secondary/60 border-b border-border"
+                            }`}
+                          >
+                            <Trophy
+                              className={`h-8 w-8 shrink-0 ${
+                                gameOver.startsWith("White wins")
+                                  ? "text-amber-400"
+                                  : gameOver.startsWith("Black wins")
+                                    ? "text-rose-400"
+                                    : "text-foreground/40"
+                              }`}
+                            />
+                            <div className="text-center">
+                              <p
+                                className={`font-display text-xl font-bold ${
+                                  gameOver.startsWith("White wins")
+                                    ? "text-emerald-300"
+                                    : gameOver.startsWith("Black wins")
+                                      ? "text-rose-300"
+                                      : "text-foreground"
+                                }`}
+                              >
+                                {gameOutcome}
+                              </p>
+                              <p className="font-body text-xs text-muted-foreground mt-0.5">
+                                {gameOver}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Stats row */}
+                          <div className="flex items-center justify-center gap-4 px-6 py-3 border-b border-border/60">
+                            <div className="text-center">
+                              <p className="font-display text-lg font-bold text-foreground">
+                                {game.history().length}
+                              </p>
+                              <p className="font-body text-[10px] uppercase tracking-wider text-muted-foreground">
+                                Moves
+                              </p>
+                            </div>
+                            {resultSummary && (
+                              <>
+                                <div className="h-8 w-px bg-border" />
+                                <div className="text-center">
+                                  <p
+                                    className={`font-display text-lg font-bold ${
+                                      eloPulse > 0 ? "text-emerald-400" : eloPulse < 0 ? "text-rose-400" : "text-foreground"
+                                    }`}
+                                  >
+                                    {eloPulse > 0 ? `+${eloPulse}` : eloPulse}
+                                  </p>
+                                  <p className="font-body text-[10px] uppercase tracking-wider text-muted-foreground">
+                                    ELO
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Action buttons */}
+                          <div className="flex flex-col gap-2 px-5 py-4">
+                            {/* PRIMARY — New Game */}
+                            <button
+                              onClick={resetGame}
+                              className="btn-chess btn-chess-primary w-full py-3 text-sm"
+                              ref={(el) => { gameOverActionRefs.current[1] = el; }}
+                            >
+                              New Game  <span className="font-mono text-[10px] opacity-60 ml-1">[R]</span>
+                            </button>
+
+                            {/* SECONDARY — Analyze */}
+                            <button
+                              onClick={async () => {
+                                markAnalysisTransitionStart();
+                                if (!reviewReady && !reviewingGame) void analyzeFinishedGame();
+                                navigate("/analyze-game");
+                              }}
+                              disabled={reviewingGame || !engineReady || !!engineError}
+                              className="btn-chess btn-chess-secondary w-full py-2.5 text-sm disabled:opacity-50"
+                              ref={(el) => { gameOverActionRefs.current[0] = el; }}
+                            >
+                              <BarChart3 className="h-4 w-4" />
+                              {reviewingGame
+                                ? `Analyzing ${reviewProgress}/${game.history().length}`
+                                : "Analysis"}
+                              <span className="font-mono text-[10px] opacity-60 ml-1">[A]</span>
+                            </button>
+
+                            {/* TERTIARY row */}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => navigate("/play")}
+                                className="btn-chess btn-chess-outline flex-1 py-2 text-xs"
+                                ref={(el) => { gameOverActionRefs.current[2] = el; }}
+                              >
+                                New Opponent
+                                <span className="font-mono text-[9px] opacity-50 ml-1">[N]</span>
+                              </button>
+                              <button
+                                onClick={copyPgn}
+                                className="btn-chess btn-chess-outline flex-1 py-2 text-xs"
+                                title="Copy PGN to clipboard"
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                                Copy PGN
+                              </button>
+                            </div>
+                          </div>
                         </motion.div>
-                        <p className="font-display text-2xl font-bold text-foreground">{gameOutcome}</p>
-                        <p className="font-body text-sm text-muted-foreground text-center leading-relaxed">{gameOver}</p>
-                        <div className="flex items-center gap-2 flex-wrap justify-center mt-1">
-                          <span className="rounded-full bg-secondary/80 border border-border px-3 py-1 font-body text-xs text-muted-foreground">
-                            {game.history().length} moves
-                          </span>
-                          {resultSummary && (
-                            <span className={`rounded-full border px-3 py-1 font-body text-xs font-semibold ${eloPulse > 0 ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400" : eloPulse < 0 ? "bg-rose-500/15 border-rose-500/30 text-rose-400" : "bg-secondary/80 border-border text-muted-foreground"}`}>
-                              {resultSummary}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
-                          <button
-                            onClick={async () => {
-                              markAnalysisTransitionStart();
-                              if (!reviewReady && !reviewingGame) void analyzeFinishedGame();
-                              navigate("/analyze-game");
-                            }}
-                            disabled={reviewingGame || !engineReady || !!engineError}
-                            className="flex items-center gap-2 rounded-lg border border-border bg-card/90 px-5 py-2.5 font-body text-sm font-semibold text-foreground transition-all hover:bg-secondary hover:scale-[1.02] disabled:opacity-50"
-                            ref={(el) => { gameOverActionRefs.current[0] = el; }}
-                          >
-                            <BarChart3 className="h-4 w-4" />
-                            {reviewingGame ? `Analyzing ${reviewProgress}/${game.history().length}` : "Analyze"}
-                          </button>
-                          <button
-                            onClick={resetGame}
-                            className="rounded-lg bg-primary px-7 py-2.5 font-body text-sm font-semibold text-primary-foreground shadow-gold transition-all hover:scale-[1.04]"
-                            ref={(el) => { gameOverActionRefs.current[1] = el; }}
-                          >
-                            Play Again
-                          </button>
-                          <button
-                            onClick={() => navigate("/play")}
-                            className="rounded-lg border border-border bg-card/90 px-5 py-2.5 font-body text-sm font-semibold text-foreground transition-all hover:bg-secondary hover:scale-[1.02]"
-                            ref={(el) => { gameOverActionRefs.current[2] = el; }}
-                          >
-                            New Opponent
-                          </button>
-                          <button
-                            onClick={copyPgn}
-                            className="flex items-center gap-1.5 rounded-lg border border-border bg-card/90 px-5 py-2.5 font-body text-sm font-medium text-muted-foreground transition-all hover:bg-secondary hover:text-foreground hover:scale-[1.02]"
-                            title="Copy game PGN"
-                          >
-                            <Copy className="h-4 w-4" />
-                            PGN
-                          </button>
-                        </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1387,7 +1513,7 @@ const Game = () => {
             <div className="rounded-xl border border-border bg-card p-4 shadow-soft">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 animate-pulse rounded-full bg-cc-green" />
+                  <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
                   <span className="font-body text-xs font-semibold text-foreground/80 uppercase tracking-wider">Live Analysis</span>
                 </div>
                 <span className="font-mono text-xs text-foreground font-semibold">
@@ -1430,8 +1556,31 @@ const Game = () => {
               <h3 className="mb-3 flex items-center gap-2 font-display text-base font-semibold">
                 <History className="h-4 w-4 text-muted-foreground" />
                 Moves
+                {moveHistory.length > 0 && (
+                  <span className="ml-auto font-mono text-[11px] font-normal text-muted-foreground">
+                    {Math.ceil(moveHistory.length / 2)} / {moveHistory.length} plies
+                  </span>
+                )}
               </h3>
               <MoveList moves={moveListEntries} activeIndex={historyIndex} onSelect={goToMove} />
+
+              {/* Live move-classification stats strip — visible once any move has a rating */}
+              {moveStatsVisible && (
+                <div className="mt-3 pt-3 border-t border-border/60">
+                  <p className="font-body text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+                    Move Accuracy
+                  </p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+                    {MOVE_STATS_ORDER.filter((s) => moveCounts[s.label]).map(({ label, dot }) => (
+                      <span key={label} className="flex items-center gap-1.5 font-body text-xs text-foreground/80">
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
+                        <span className="text-muted-foreground">{label}:</span>
+                        <span className="font-semibold tabular-nums">{moveCounts[label]}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Post-game review */}

@@ -31,13 +31,71 @@ export interface GameReviewReport {
 export const GAME_REVIEW_STORAGE_KEY = "platochess:last-game-review";
 export const FINISHED_GAME_STORAGE_KEY = "platochess:last-finished-game";
 export const PERSONALIZED_PUZZLES_STORAGE_KEY = "platochess:personalized-puzzles";
+export const GAME_HISTORY_STORAGE_KEY = "platochess:game-history";
 const ANALYSIS_TRANSITION_STORAGE_KEY = "platochess:analysis-transition-start-ms";
+
+/** Maximum number of entries kept in the rolling game-history list. */
+const GAME_HISTORY_MAX = 50;
 
 export interface FinishedGameSnapshot {
   createdAt: number;
   pgn: string;
   result: string;
   engine: string;
+}
+
+/**
+ * Lightweight record saved for every completed game so the Dashboard can show
+ * a full history list (opponent name, result, date, move count, accuracy).
+ */
+export interface GameHistoryEntry {
+  id: string;
+  createdAt: number;
+  opponent: string;
+  result: "win" | "loss" | "draw";
+  resultDetail: string;
+  moveCount: number;
+  /** Accuracy scores after analysis; null until/unless the user runs the review. */
+  accuracy?: { w: number; b: number } | null;
+  pgn?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Game History helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function getGameHistory(): GameHistoryEntry[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(GAME_HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as GameHistoryEntry[];
+  } catch {
+    return [];
+  }
+}
+
+export function appendToGameHistory(entry: GameHistoryEntry): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const existing = getGameHistory();
+    // Prepend newest entry; cap at max.
+    const updated = [entry, ...existing].slice(0, GAME_HISTORY_MAX);
+    localStorage.setItem(GAME_HISTORY_STORAGE_KEY, JSON.stringify(updated));
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+export function updateGameHistoryAccuracy(id: string, accuracy: { w: number; b: number }): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const existing = getGameHistory();
+    const updated = existing.map((e) => (e.id === id ? { ...e, accuracy } : e));
+    localStorage.setItem(GAME_HISTORY_STORAGE_KEY, JSON.stringify(updated));
+  } catch {
+    /* ignore */
+  }
 }
 
 export interface PersonalizedPuzzle {

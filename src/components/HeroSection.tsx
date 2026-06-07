@@ -1,11 +1,59 @@
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
+import { Bot, LineChart, Puzzle, BookOpen, Swords } from "lucide-react";
 import heroImg from "@/assets/hero-chess.jpg";
 import { LogoMark } from "@/components/LogoMark";
 
+const QUICK_ACTIONS = [
+  {
+    icon: Swords,
+    label: "Play Online",
+    sublabel: "Find an opponent",
+    href: "/play",
+    primary: true,
+  },
+  {
+    icon: Bot,
+    label: "Play Computer",
+    sublabel: "Challenge a philosopher-bot",
+    href: "/bots",
+    primary: false,
+  },
+  {
+    icon: Puzzle,
+    label: "Puzzles",
+    sublabel: "Sharpen tactics daily",
+    href: "/puzzles",
+    primary: false,
+  },
+  {
+    icon: LineChart,
+    label: "Analysis",
+    sublabel: "Review your games",
+    href: "/analyze",
+    primary: false,
+  },
+  {
+    icon: BookOpen,
+    label: "Openings",
+    sublabel: "Drill classical lines",
+    href: "/openings",
+    primary: false,
+  },
+];
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 18 },
+  visible: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.42, delay: 0.75 + i * 0.07, ease: "easeOut" },
+  }),
+};
+
 const HeroSection = () => {
   return (
-    <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
+    <section className="relative min-h-screen flex flex-col items-center justify-center overflow-hidden">
       {/* Background */}
       <div className="absolute inset-0">
         <img
@@ -57,37 +105,86 @@ const HeroSection = () => {
           transition={{ duration: 0.65, delay: 0.5 }}
           className="font-body text-base md:text-lg text-muted-foreground max-w-xl mx-auto mb-10 leading-relaxed"
         >
-          Puzzles, openings, engine play, and post-game analysis — styled in
-          black and white like the pieces themselves.
+          Puzzles, openings, engine play, and post-game analysis — guided by the
+          great minds of antiquity.
         </motion.p>
 
-        {/* CTAs */}
+        {/* Primary CTAs */}
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.65, delay: 0.65 }}
-          className="flex flex-col sm:flex-row items-center justify-center gap-4"
+          className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16"
         >
-          <Link
-            to="/play"
-            className="bg-primary px-8 py-3.5 rounded-md font-body text-base font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.03]"
-          >
-            Begin training
+          <Link to="/play" className="btn-chess btn-chess-primary text-base px-10 py-3.5">
+            Begin Training
           </Link>
-          <a
-            href="#features"
-            className="border border-border px-8 py-3.5 rounded-md font-body text-base text-foreground transition-colors hover:bg-secondary"
-          >
-            Explore features
+          <a href="#features" className="btn-chess btn-chess-outline text-base px-10 py-3.5">
+            Explore Features
           </a>
         </motion.div>
+
+        {/* Quick-play grid — Chess.com-style card grid */}
+        <div className="mx-auto max-w-3xl">
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5, delay: 0.72 }}
+            className="font-body text-xs uppercase tracking-[0.3em] text-muted-foreground mb-5"
+          >
+            Jump right in
+          </motion.p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            {QUICK_ACTIONS.map(({ icon: Icon, label, sublabel, href, primary }, i) => (
+              <motion.div
+                key={href}
+                custom={i}
+                variants={cardVariants}
+                initial="hidden"
+                animate="visible"
+              >
+                <Link
+                  to={href}
+                  className={`group flex flex-col items-center gap-2.5 rounded-xl border p-4 text-center transition-all duration-200 ${
+                    primary
+                      ? "border-primary/40 bg-primary/10 hover:bg-primary/20 hover:border-primary/60"
+                      : "border-border bg-card hover:bg-secondary hover:border-foreground/20"
+                  }`}
+                >
+                  <div
+                    className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
+                      primary
+                        ? "bg-primary/20 text-primary group-hover:bg-primary/30"
+                        : "bg-secondary text-foreground/70 group-hover:text-foreground"
+                    }`}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p
+                      className={`font-display text-sm font-semibold leading-tight ${
+                        primary ? "text-primary" : "text-foreground"
+                      }`}
+                    >
+                      {label}
+                    </p>
+                    <p className="font-body text-[11px] text-muted-foreground mt-0.5 leading-tight">
+                      {sublabel}
+                    </p>
+                  </div>
+                </Link>
+              </motion.div>
+            ))}
+          </div>
+        </div>
 
         {/* Decorative mini board */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 1, delay: 0.9 }}
-          className="mt-20 flex justify-center gap-0.5 opacity-30"
+          transition={{ duration: 1, delay: 1.2 }}
+          className="mt-16 flex justify-center gap-0.5 opacity-20"
         >
           {Array.from({ length: 8 }).map((_, row) => (
             <div key={row} className="flex flex-col gap-0.5">

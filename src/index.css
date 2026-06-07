@@ -154,4 +154,80 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+
+  /*
+   * Chess.com-style "3D pressed" button helpers.
+   * Usage: add btn-chess + btn-chess-primary (or -secondary / -danger) to any button/link.
+   * The solid bottom border creates the ledge; active/pressed state sinks it.
+   */
+  .btn-chess {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.375rem;
+    padding: 0.625rem 1.5rem;
+    font-family: var(--font-body);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.25;
+    cursor: pointer;
+    transition: transform 80ms ease, box-shadow 80ms ease;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .btn-chess:active {
+    transform: translateY(2px);
+  }
+
+  /* Primary — brand teal */
+  .btn-chess-primary {
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    box-shadow: 0 4px 0 0 hsl(191 92% 32%);
+  }
+  .btn-chess-primary:active {
+    box-shadow: 0 1px 0 0 hsl(191 92% 32%);
+  }
+  .btn-chess-primary:hover:not(:active) {
+    background: hsl(191 92% 63%);
+  }
+
+  /* Secondary — subtle card surface */
+  .btn-chess-secondary {
+    background: hsl(var(--secondary));
+    color: hsl(var(--foreground));
+    box-shadow: 0 4px 0 0 hsl(222 33% 10%);
+  }
+  .btn-chess-secondary:active {
+    box-shadow: 0 1px 0 0 hsl(222 33% 10%);
+  }
+  .btn-chess-secondary:hover:not(:active) {
+    background: hsl(222 33% 20%);
+  }
+
+  /* Danger — red for resign / destructive */
+  .btn-chess-danger {
+    background: hsl(var(--destructive));
+    color: hsl(var(--destructive-foreground));
+    box-shadow: 0 4px 0 0 hsl(0 70% 32%);
+  }
+  .btn-chess-danger:active {
+    box-shadow: 0 1px 0 0 hsl(0 70% 32%);
+  }
+
+  /* Outline variant (no fill, just a border + ledge) */
+  .btn-chess-outline {
+    background: transparent;
+    color: hsl(var(--foreground));
+    border: 1.5px solid hsl(var(--border));
+    box-shadow: 0 3px 0 0 hsl(220 24% 14%);
+    padding: calc(0.625rem - 1.5px) calc(1.5rem - 1.5px);
+  }
+  .btn-chess-outline:active {
+    box-shadow: 0 1px 0 0 hsl(220 24% 14%);
+  }
+  .btn-chess-outline:hover:not(:active) {
+    background: hsl(var(--secondary));
+  }
 }
