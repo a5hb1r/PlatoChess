@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Check, Loader2, Zap, Crown, Sparkles } from "lucide-react";
+import { ArrowLeft, Check, X, Loader2, Zap, Crown, Sparkles } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { EmbeddedCheckout, EmbeddedCheckoutProvider } from "@stripe/react-stripe-js";
 import { stripePromise } from "@/lib/stripe";
@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/use-profile";
 import { LogoMark } from "@/components/LogoMark";
+import { PRICING_FEATURES } from "@/lib/tier-features";
 
 const PLANS = [
   {
@@ -19,13 +20,12 @@ const PLANS = [
     description: "For casual players",
     icon: Sparkles,
     badge: null,
-    features: [
-      "Unlimited puzzles",
-      "Play vs Stockfish",
+    highlights: [
+      "10 puzzles / day",
+      "3 philosopher bots (up to ~900 ELO)",
       "Openings explorer",
-      "Basic game history",
+      "Human vs human games",
     ],
-    locked: [],
     cta: "Current plan",
     ctaDisabled: true,
   },
@@ -38,14 +38,13 @@ const PLANS = [
     description: "For the dedicated improver",
     icon: Zap,
     badge: "Popular",
-    features: [
-      "Everything in Free",
-      "Full game analysis",
-      "Move ratings + glyphs",
+    highlights: [
+      "Unlimited puzzles",
+      "6 bots (up to ~1650 ELO)",
+      "Full post-game analysis",
+      "Move ratings + AI coach",
       "Personalized puzzles",
-      "Post-game AI coach",
     ],
-    locked: [],
     cta: "Subscribe to Pro",
     ctaDisabled: false,
   },
@@ -58,14 +57,13 @@ const PLANS = [
     description: "Train like a titled player",
     icon: Crown,
     badge: "Best value",
-    features: [
+    highlights: [
       "Everything in Pro",
-      "Unlimited deep analysis",
-      "Advanced opening prep",
-      "Priority engine depth",
-      "Human vs Human matchmaking",
+      "All 8 bots incl. Hypatia & Plato (~2100)",
+      "Deep analysis (depth 15)",
+      "Custom position analysis",
+      "Priority matchmaking",
     ],
-    locked: [],
     cta: "Subscribe to Master",
     ctaDisabled: false,
   },
@@ -213,7 +211,7 @@ const Pricing = () => {
                 </div>
 
                 <ul className="space-y-2.5 flex-1">
-                  {plan.features.map((f) => (
+                  {plan.highlights.map((f) => (
                     <li key={f} className="flex items-start gap-2.5 font-body text-sm">
                       <Check className="h-4 w-4 shrink-0 text-primary mt-px" />
                       <span>{f}</span>
@@ -246,6 +244,54 @@ const Pricing = () => {
             );
           })}
         </div>
+
+        {/* Feature comparison table */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.3 }}
+          className="mt-16"
+        >
+          <h2 className="font-display text-2xl font-bold text-center mb-6">
+            Full feature comparison
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full font-body text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left py-3 pr-4 font-semibold text-foreground/80 w-1/2">Feature</th>
+                  <th className="py-3 px-3 font-semibold text-foreground/80 text-center">Free</th>
+                  <th className="py-3 px-3 font-semibold text-foreground/80 text-center">Pro</th>
+                  <th className="py-3 px-3 font-semibold text-foreground/80 text-center">Master</th>
+                </tr>
+              </thead>
+              <tbody>
+                {PRICING_FEATURES.map((row, i) => (
+                  <tr
+                    key={row.label}
+                    className={`border-b border-border/50 ${i % 2 === 0 ? "bg-secondary/30" : ""}`}
+                  >
+                    <td className="py-3 pr-4 text-foreground/80">{row.label}</td>
+                    {(["free", "pro", "master"] as const).map((tier) => {
+                      const val = row[tier];
+                      return (
+                        <td key={tier} className="py-3 px-3 text-center">
+                          {val === true ? (
+                            <Check className="h-4 w-4 text-primary mx-auto" />
+                          ) : val === false ? (
+                            <X className="h-4 w-4 text-muted-foreground/40 mx-auto" />
+                          ) : (
+                            <span className="text-foreground/70 text-xs">{val}</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </motion.div>
 
         <p className="text-center font-body text-xs text-muted-foreground mt-10">
           Cancel anytime from{" "}

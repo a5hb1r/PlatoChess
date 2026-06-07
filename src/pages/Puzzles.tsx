@@ -18,8 +18,30 @@ import {
   Sparkles,
   Gift,
   Loader2,
+  Lock,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useProfile } from "@/hooks/use-profile";
+import { getPuzzleLimit } from "@/lib/tier-features";
+
+// ── Daily puzzle counter (resets at midnight) ────────────────────────────────
+const DAILY_KEY = "platochess:puzzle_daily";
+interface DailyCount { date: string; count: number }
+function getTodayStr() { return new Date().toISOString().slice(0, 10); }
+function getDailyCount(): number {
+  try {
+    const raw = localStorage.getItem(DAILY_KEY);
+    if (!raw) return 0;
+    const val = JSON.parse(raw) as DailyCount;
+    return val.date === getTodayStr() ? val.count : 0;
+  } catch { return 0; }
+}
+function incrementDailyCount(): number {
+  const today = getTodayStr();
+  const next = getDailyCount() + 1;
+  localStorage.setItem(DAILY_KEY, JSON.stringify({ date: today, count: next }));
+  return next;
+}
 import { Chess, Color, Square, PieceSymbol } from "chess.js";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
 import { PIECE_URLS } from "@/lib/chess-constants";
@@ -120,6 +142,11 @@ function mapLichess(p: LichessPuzzle): Puzzle {
 
 const Puzzles = () => {
   const [searchParams] = useSearchParams();
+  const { isPro, isMaster } = useProfile();
+  const puzzleLimit = getPuzzleLimit(isPro, isMaster);
+  const [dailyCount, setDailyCount] = useState(getDailyCount);
+  const limitReached = dailyCount >= puzzleLimit;
+
   const [category, setCategory] = useState("all");
   const [puzzleIndex, setPuzzleIndex] = useState(0);
   const [game, setGame] = useState<Chess | null>(null);
@@ -248,6 +275,7 @@ const Puzzles = () => {
           ChessSounds.promote();
           setSolved((prev) => new Set(prev).add(currentPuzzle.id));
           setStreak((s) => s + 1);
+          setDailyCount(incrementDailyCount());
           return;
         }
 
@@ -275,6 +303,7 @@ const Puzzles = () => {
                 ChessSounds.promote();
                 setSolved((prev) => new Set(prev).add(currentPuzzle.id));
                 setStreak((s) => s + 1);
+                setDailyCount(incrementDailyCount());
               }
             }
           }
@@ -423,6 +452,38 @@ const Puzzles = () => {
       : currentPuzzle.difficulty === "medium"
       ? "text-foreground/75"
       : "text-destructive";
+
+  // Daily limit paywall
+  if (limitReached) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-6 px-6">
+        <div className="text-5xl">🔒</div>
+        <h2 className="font-display text-3xl font-bold text-center">
+          Daily puzzle limit reached
+        </h2>
+        <p className="font-body text-muted-foreground text-center max-w-sm">
+          Free accounts get <strong>10 puzzles per day</strong>. Come back tomorrow, or upgrade to Pro for unlimited puzzles.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Link
+            to="/pricing"
+            className="bg-primary px-8 py-3 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02]"
+          >
+            Upgrade to Pro — $9/mo
+          </Link>
+          <Link
+            to="/play"
+            className="border border-border px-8 py-3 rounded-md font-body text-sm font-medium text-foreground hover:bg-secondary transition-colors"
+          >
+            Play a game instead
+          </Link>
+        </div>
+        <p className="font-body text-xs text-muted-foreground">
+          Resets at midnight · {dailyCount}/{puzzleLimit === Infinity ? "∞" : puzzleLimit} used today
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">

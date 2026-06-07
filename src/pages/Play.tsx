@@ -325,7 +325,7 @@ const Play = () => {
           </motion.div>
         )}
 
-        {/* Practice vs Stockfish */}
+        {/* Play a Bot */}
         <motion.div
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
@@ -337,48 +337,20 @@ const Play = () => {
             Practice
           </p>
           <h2 className="font-display text-2xl md:text-3xl font-bold mb-2">
-            Play vs Stockfish
+            Play a Bot
           </h2>
-          <p className="font-body text-sm text-muted-foreground mb-6">
-            Sharpen your skills against the engine at different difficulty levels.
+          <p className="font-body text-sm text-muted-foreground mb-6 max-w-lg">
+            Challenge 8 philosopher-bots from beginner (~300 ELO) to near-master (~2100 ELO).
+            Free players get 3 bots — Pro and Master unlock the rest.
           </p>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {STOCKFISH_LEVELS.map((lvl) => (
-              <button
-                key={lvl.level}
-                onClick={() => handlePlayStockfish(lvl.level)}
-                className="group relative rounded-lg border border-border bg-card p-5 text-left transition-all duration-200 hover:border-foreground/25 hover:shadow-gold"
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <Bot className="w-5 h-5 text-foreground/75" />
-                  <span className="font-display text-base font-semibold text-foreground">
-                    {lvl.label}
-                  </span>
-                </div>
-                <p className="font-mono text-xs text-muted-foreground">
-                  {lvl.rating}
-                </p>
-              </button>
-            ))}
-          </div>
-
-          <p className="font-body text-sm text-muted-foreground mt-8 mb-3">
-            Play against philosopher coaches (engine opponent + live philosopher dialogue).
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {COACH_MATCHUPS.map((coach) => (
-              <Link
-                key={coach.id}
-                to={`/game?level=${coach.level}&coach=${coach.id}&mode=practice`}
-                className="rounded-lg border border-border bg-card p-4 hover:bg-secondary hover:border-foreground/25 transition-colors"
-              >
-                <p className="font-display text-base font-semibold text-foreground">{coach.name}</p>
-                <p className="font-body text-xs text-muted-foreground mt-1">{coach.style}</p>
-                <p className="font-mono text-[11px] text-muted-foreground mt-2">Level {coach.level + 1}</p>
-              </Link>
-            ))}
-          </div>
+          <Link
+            to="/bots"
+            className="inline-flex items-center gap-3 bg-primary px-8 py-4 rounded-md font-body text-base font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
+          >
+            <Bot className="h-5 w-5" />
+            Browse Bots
+          </Link>
         </motion.div>
 
         {/* Chess Puzzles */}
