@@ -52,6 +52,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/use-profile";
 import { getBotById, isBotUnlocked } from "@/lib/bots";
 import { Lock } from "lucide-react";
+import {
+  getPersonality,
+  getBotLine,
+  pickDialogueForMove,
+  pickTaunt,
+  type BotPersonality,
+} from "@/lib/bot-personalities";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -143,6 +150,13 @@ const Game = () => {
   const mode = parseGameMode(searchParams.get("mode"));
   const isDailyMode = mode === "daily";
   const [coachLine, setCoachLine] = useState<string | null>(null);
+
+  // Named-bot personality dialogue
+  const botPersonality: BotPersonality | null = namedBot ? getPersonality(namedBot.id) : null;
+  type BotMsg = { id: number; text: string; isBot: boolean };
+  const [botMessages, setBotMessages] = useState<BotMsg[]>([]);
+  const prevEvalRef = useRef<number>(0);
+  const botMessageEndRef = useRef<HTMLDivElement>(null);
 
   // Time control (minutes + Fischer increment seconds, defaults to 10|0).
   const initialMinutes = Number(searchParams.get("min")) || 10;
@@ -433,6 +447,64 @@ const Game = () => {
     const last = moveHistory[moveHistory.length - 1];
     setCoachLine(coachOnEval(coach, eval_, evalMate, last?.san ?? null, moveHistory.length * 13));
   }, [coach, moveHistory, eval_, evalMate, reviewingGame]);
+
+  // ── Bot personality dialogue ─────────────────────────────────────────────
+  const addBotMsg = useCallback((text: string, isBot = true) => {
+    if (!text) return;
+    setBotMessages((prev) => [...prev, { id: Date.now() + Math.random(), text, isBot }]);
+  }, []);
+
+  // Greeting when game starts
+  useEffect(() => {
+    if (!botPersonality) return;
+    const greeting = getBotLine(botPersonality, "greeting", Math.floor(Math.random() * 1000));
+    addBotMsg(greeting);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!botPersonality]);
+
+  // React to every move (both player and bot)
+  useEffect(() => {
+    if (!botPersonality || moveHistory.length === 0) return;
+    const n = moveHistory.length;
+    const playerJustMoved = n % 2 === 1; // odd half-moves = white (player) just moved
+    const evalDelta = eval_ - prevEvalRef.current;
+    prevEvalRef.current = eval_;
+    const last = moveHistory[n - 1];
+    const seed = n * 17 + Math.abs(evalDelta | 0);
+    const text = pickDialogueForMove(
+      botPersonality,
+      playerJustMoved,
+      evalDelta,
+      n,
+      last?.rating?.label,
+      eval_
+    );
+    addBotMsg(text);
+
+    // Occasional taunt every ~6 moves
+    if (n > 4 && n % 6 === 0) {
+      const taunt = pickTaunt(botPersonality, eval_, seed);
+      setTimeout(() => addBotMsg(taunt), 1200);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moveHistory.length]);
+
+  // Game over message
+  useEffect(() => {
+    if (!botPersonality || !gameOver) return;
+    let moment: "win" | "loss" | "draw" = "draw";
+    if (gameOver.toLowerCase().includes("white wins")) moment = "loss"; // bot wins = player loses
+    else if (gameOver.toLowerCase().includes("black wins")) moment = "win"; // player wins = bot loses
+    const text = getBotLine(botPersonality, moment, Date.now());
+    addBotMsg(text);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameOver]);
+
+  // Auto-scroll bot chat
+  useEffect(() => {
+    botMessageEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [botMessages]);
+  // ────────────────────────────────────────────────────────────────────────
 
   const executeMove = useCallback(
     (from: Square, to: Square, promotion?: string) => {
@@ -1341,6 +1413,53 @@ const Game = () => {
                 <p className="font-body text-[10px] text-muted-foreground/80">
                   Add <span className="font-mono">?coach={coach}</span> to the URL to return to this guide.
                 </p>
+              </div>
+            )}
+
+            {/* Bot personality chat panel */}
+            {botPersonality && (
+              <div className="rounded-lg border border-border bg-card flex flex-col overflow-hidden">
+                {/* Header */}
+                <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border bg-secondary/40">
+                  <span className="text-xl leading-none">{namedBot?.emoji}</span>
+                  <div>
+                    <p className="font-display text-sm font-semibold text-foreground leading-none">
+                      {botPersonality.displayName}
+                    </p>
+                    <p className="font-body text-[10px] text-muted-foreground mt-0.5">
+                      {botPersonality.tagline}
+                    </p>
+                  </div>
+                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                    {namedBot?.ratingLabel}
+                  </span>
+                </div>
+
+                {/* Messages */}
+                <div className="flex flex-col gap-2 p-3 max-h-52 overflow-y-auto">
+                  {botMessages.length === 0 && (
+                    <p className="font-body text-xs text-muted-foreground italic text-center py-3">
+                      {botPersonality.displayName} is thinking…
+                    </p>
+                  )}
+                  {botMessages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`flex ${msg.isBot ? "justify-start" : "justify-end"}`}
+                    >
+                      <div
+                        className={`max-w-[90%] rounded-lg px-3 py-2 font-body text-xs leading-relaxed ${
+                          msg.isBot
+                            ? "bg-secondary text-foreground rounded-tl-none"
+                            : "bg-primary text-primary-foreground rounded-tr-none"
+                        }`}
+                      >
+                        {msg.text}
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={botMessageEndRef} />
+                </div>
               </div>
             )}
           </div>
