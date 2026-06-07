@@ -53,6 +53,7 @@ import {
 import { describeGameTermination } from "@/lib/game-termination";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/use-profile";
+import { useTheme } from "@/contexts/ThemeContext";
 import { getBotById, isBotUnlocked } from "@/lib/bots";
 import {
   getPersonality,
@@ -92,6 +93,16 @@ type QueuedPremove = {
   to: Square;
   promotion?: string;
 };
+
+type GameMode = "practice" | "daily" | "online";
+type BotMsg = { id: number; text: string; isBot: boolean };
+
+function parseGameMode(raw: string | null): GameMode {
+  const r = (raw || "").toLowerCase();
+  if (r === "daily") return "daily";
+  if (r === "online") return "online";
+  return "practice";
+}
 
 function parseCoachId(raw: string | null): CoachId {
   const r = (raw || "").toLowerCase();
@@ -155,7 +166,6 @@ const Game = () => {
 
   // Named-bot personality dialogue
   const botPersonality: BotPersonality | null = namedBot ? getPersonality(namedBot.id) : null;
-  type BotMsg = { id: number; text: string; isBot: boolean };
   const [botMessages, setBotMessages] = useState<BotMsg[]>([]);
   const prevEvalRef = useRef<number>(0);
   const botMessageEndRef = useRef<HTMLDivElement>(null);
