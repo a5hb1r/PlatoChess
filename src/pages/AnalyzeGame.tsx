@@ -1025,9 +1025,9 @@ export default function AnalyzeGame() {
                     openingSuite.passedGames.slice(0, 6).map((game) => (
                       <a
                         key={game.id}
-                        href={game.url}
+                        href={`https://lichess.org/${game.id}`}
                         target="_blank"
-                        rel="noreferrer"
+                        rel="noopener noreferrer"
                         className="block rounded-md border border-border bg-background px-2 py-1.5 text-[11px] hover:bg-secondary"
                       >
                         <p className="font-semibold text-foreground">{game.white} vs {game.black}</p>

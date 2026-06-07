@@ -21,7 +21,6 @@ export interface PassedGameRecord {
   result: string;
   year: number;
   event: string;
-  url?: string;
 }
 
 export interface OpeningSuiteData {
@@ -293,12 +292,17 @@ async function buildTheoryTree(
   return expand(fen, options.maxDepth, "root");
 }
 
+/** Lichess game IDs are 8 alphanumeric characters (e.g. "aAbBcCdD"). */
+const LICHESS_GAME_ID_RE = /^[A-Za-z0-9]{4,12}$/;
+
 function mapPassedGamesFromLichess(dto: LichessExplorerResponse): PassedGameRecord[] {
   const games = [...(dto.topGames ?? []), ...(dto.recentGames ?? [])];
   const seen = new Set<string>();
   const rows: PassedGameRecord[] = [];
   for (const game of games) {
-    if (!game.id || seen.has(game.id)) continue;
+    // Validate ID before using it to prevent open-redirect / injection via
+    // a malicious or unexpected API response.
+    if (!game.id || !LICHESS_GAME_ID_RE.test(game.id) || seen.has(game.id)) continue;
     seen.add(game.id);
     rows.push({
       id: game.id,
@@ -307,7 +311,6 @@ function mapPassedGamesFromLichess(dto: LichessExplorerResponse): PassedGameReco
       result: game.winner === "white" ? "1-0" : game.winner === "black" ? "0-1" : "1/2-1/2",
       year: game.year ?? 0,
       event: game.month ? `Master DB ${game.month}` : "Master DB",
-      url: `https://lichess.org/${game.id}`,
     });
   }
   return rows.slice(0, 10);

@@ -58,6 +58,13 @@ const ChartContainer = React.forwardRef<
 });
 ChartContainer.displayName = "Chart";
 
+/** Allow-list sanitizer: strips any character that isn't safe in a CSS
+ *  identifier or color value, preventing style-injection via chart config. */
+function sanitizeCssValue(value: string): string {
+  // Permit: alphanumeric, space, #, %, (, ), comma, dash, dot, underscore
+  return value.replace(/[^a-zA-Z0-9 #%(),.\-_]/g, "");
+}
+
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(([_, config]) => config.theme || config.color);
 
@@ -65,17 +72,20 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null;
   }
 
+  // Sanitize the chart id so it cannot break out of the attribute selector.
+  const safeId = id.replace(/[^a-zA-Z0-9\-_]/g, "");
+
   return (
     <style
       dangerouslySetInnerHTML={{
         __html: Object.entries(THEMES)
           .map(
             ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
+${prefix} [data-chart=${safeId}] {
 ${colorConfig
   .map(([key, itemConfig]) => {
     const color = itemConfig.theme?.[theme as keyof typeof itemConfig.theme] || itemConfig.color;
-    return color ? `  --color-${key}: ${color};` : null;
+    return color ? `  --color-${key}: ${sanitizeCssValue(color)};` : null;
   })
   .join("\n")}
 }
