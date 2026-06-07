@@ -23,7 +23,7 @@ function Inner({ iconSize = "md", textClass = "text-xl" }: LogoProps) {
         className={`inline-flex items-center justify-center shrink-0 border border-foreground/15 bg-foreground/[0.07] text-foreground select-none leading-none ${badge[iconSize]}`}
         aria-hidden="true"
       >
-        ♞
+        ♝
       </span>
       <span className={`font-display font-semibold tracking-tight ${textClass}`}>
         Plato<span className="text-gradient-brand">Chess</span>
