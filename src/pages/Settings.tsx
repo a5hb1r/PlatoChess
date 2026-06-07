@@ -16,6 +16,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { validateDisplayName, validateUsername } from "@/lib/content-moderation";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -34,6 +35,8 @@ interface Profile {
   premove_enabled: boolean;
   rating: number;
   username: string | null;
+  subscription_status: string | null;
+  subscription_plan: string | null;
 }
 
 const Settings = () => {
@@ -71,7 +74,7 @@ const Settings = () => {
 
     supabase
       .from("profiles")
-      .select("avatar_url, display_name, max_active_games, premove_enabled, rating, username")
+      .select("avatar_url, display_name, max_active_games, premove_enabled, rating, username, subscription_status, subscription_plan")
       .eq("user_id", user.id)
       .single()
       .then(({ data, error }) => {
@@ -98,7 +101,9 @@ const Settings = () => {
     setSaving(true);
     const { error } = await supabase.from("profiles").update(updates).eq("user_id", user.id);
     if (error) {
-      if (error.message.toLowerCase().includes("username")) {
+      if (error.message.toLowerCase().includes("disallowed content")) {
+        toast.error("That name isn't allowed. Please choose a different one.");
+      } else if (error.message.toLowerCase().includes("username")) {
         toast.error("That username is already taken.");
       } else {
         toast.error("Failed to save. Please try again.");
@@ -121,24 +126,16 @@ const Settings = () => {
 
   const saveDisplayName = async () => {
     const trimmed = nameValue.trim();
-    if (trimmed.length > 50) {
-      toast.error("Display name must be under 50 characters.");
-      return;
-    }
+    const err = validateDisplayName(trimmed);
+    if (err) { toast.error(err); return; }
     await updateProfile({ display_name: trimmed || null });
     setEditingName(false);
   };
 
   const saveUsername = async () => {
     const trimmed = usernameValue.trim();
-    if (trimmed.length < 3 || trimmed.length > 30) {
-      toast.error("Username must be 3-30 characters.");
-      return;
-    }
-    if (!/^[a-zA-Z0-9_]+$/.test(trimmed)) {
-      toast.error("Username can only contain letters, numbers, and underscores.");
-      return;
-    }
+    const err = validateUsername(trimmed);
+    if (err) { toast.error(err); return; }
     await updateProfile({ username: trimmed.toLowerCase() });
     setEditingUsername(false);
   };
@@ -515,14 +512,32 @@ const Settings = () => {
               <CreditCard className="h-5 w-5 text-foreground/75" />
               Subscription
             </h2>
-            <div className="rounded-lg border border-border bg-card p-6">
-              <p className="font-body text-sm text-muted-foreground mb-4">
-                Manage your subscription, update payment methods, or cancel your plan through the Stripe Customer Portal.
+            <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+              {profile && (
+                <div className="flex items-center gap-3">
+                  <span className="font-body text-sm text-muted-foreground">Current plan:</span>
+                  <span className="font-body text-sm font-semibold capitalize text-foreground">
+                    {profile.subscription_status === "active" && profile.subscription_plan
+                      ? profile.subscription_plan
+                      : "Free"}
+                  </span>
+                  {profile.subscription_status !== "active" && (
+                    <Link
+                      to="/pricing"
+                      className="ml-auto inline-flex items-center gap-1.5 bg-primary px-4 py-2 rounded-md font-body text-xs font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
+                    >
+                      Upgrade
+                    </Link>
+                  )}
+                </div>
+              )}
+              <p className="font-body text-sm text-muted-foreground">
+                Update payment methods or cancel your plan through the Stripe Customer Portal.
               </p>
               <button
                 onClick={handleManageSubscription}
                 disabled={loadingPortal}
-                className="inline-flex items-center gap-2 bg-primary px-6 py-3 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                className="inline-flex items-center gap-2 border border-border px-6 py-3 rounded-md font-body text-sm font-semibold text-foreground transition-colors hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loadingPortal ? (
                   <>

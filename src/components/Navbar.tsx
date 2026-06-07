@@ -22,9 +22,9 @@ const Navbar = () => {
           <a href="#method" className="transition-colors hover:text-foreground">
             Method
           </a>
-          <a href="#pricing" className="transition-colors hover:text-foreground">
+          <Link to="/pricing" className="transition-colors hover:text-foreground">
             Pricing
-          </a>
+          </Link>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">

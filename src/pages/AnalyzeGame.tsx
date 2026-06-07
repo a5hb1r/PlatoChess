@@ -40,6 +40,8 @@ import { buildGameReviewReport } from "@/lib/review-builder";
 import { buildOpeningSuite, lineToFen, openingLinePreview, type OpeningSuiteData, type OpeningTheoryNode } from "@/lib/opening-suite";
 import { buildPersonalizedPuzzles } from "@/lib/personalized-puzzles";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { useProfile } from "@/hooks/use-profile";
+import { Lock } from "lucide-react";
 
 function squareCenter(square: Square): { x: number; y: number } {
   const file = square.charCodeAt(0) - 97;
@@ -104,6 +106,7 @@ function TheoryNode({
 
 export default function AnalyzeGame() {
   const navigate = useNavigate();
+  const { isPro, loading: profileLoading } = useProfile();
   const engineRef = useRef<StockfishEngine | null>(null);
   const [report, setReport] = useState<GameReviewReport | null>(() => loadLatestGameReview());
   const [reviewing, setReviewing] = useState(false);
@@ -578,6 +581,45 @@ export default function AnalyzeGame() {
             <p className="font-display text-xl font-semibold">Generating post-game review...</p>
             <p className="text-sm text-muted-foreground">
               {reviewProgress.done}/{reviewProgress.total} plies analyzed.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Paywall: full game analysis requires Pro or Master
+  if (!profileLoading && !isPro) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
+          <div className="container mx-auto flex items-center gap-3 px-4 py-4">
+            <Link to="/game" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Link>
+            <h1 className="font-display text-xl font-semibold">Post-Game Analysis</h1>
+          </div>
+        </nav>
+        <div className="flex-1 flex items-center justify-center px-6">
+          <div className="text-center max-w-sm">
+            <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-secondary mb-6">
+              <Lock className="h-7 w-7 text-foreground/60" />
+            </div>
+            <h2 className="font-display text-2xl font-bold mb-3">
+              Pro feature
+            </h2>
+            <p className="font-body text-muted-foreground mb-8 leading-relaxed">
+              Full post-game analysis with move ratings, best-move suggestions, and coach feedback requires a Pro or Master subscription.
+            </p>
+            <Link
+              to="/pricing"
+              className="inline-flex items-center gap-2 bg-primary px-8 py-3.5 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
+            >
+              See plans
+            </Link>
+            <p className="font-body text-xs text-muted-foreground mt-4">
+              Starts at $9 / month. Cancel anytime.
             </p>
           </div>
         </div>
