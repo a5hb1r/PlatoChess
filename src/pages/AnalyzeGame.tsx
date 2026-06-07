@@ -588,8 +588,8 @@ export default function AnalyzeGame() {
     );
   }
 
-  // Paywall: full game analysis requires Pro or Master
-  if (!profileLoading && !isPro) {
+  // Paywall: full game analysis requires Pro or Master (bypassed in local dev)
+  if (!import.meta.env.DEV && !profileLoading && !isPro) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
