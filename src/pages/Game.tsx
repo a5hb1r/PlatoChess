@@ -49,6 +49,9 @@ import {
 } from "@/lib/game-review";
 import { describeGameTermination } from "@/lib/game-termination";
 import { useAuth } from "@/contexts/AuthContext";
+import { useProfile } from "@/hooks/use-profile";
+import { getBotById, isBotUnlocked } from "@/lib/bots";
+import { Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -116,13 +119,26 @@ function eloPulseForResult(result: string, skillLevel: number): number {
 
 const Game = () => {
   const { user } = useAuth();
+  const { isPro, isMaster, loading: profileLoading } = useProfile();
   const { showValidMoves } = useTheme();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const difficultyParam = parseInt(searchParams.get("level") || "2");
   const modeParam = (searchParams.get("mode") || "practice").toLowerCase();
   const isPracticeMode = modeParam !== "online";
-  const difficulty = DIFFICULTY_LEVELS[Math.min(difficultyParam, DIFFICULTY_LEVELS.length - 1)];
+
+  // Named-bot support: override skill/depth from URL params when a bot is specified
+  const botId = searchParams.get("bot");
+  const namedBot = botId ? getBotById(botId) : null;
+  const baseLevel = DIFFICULTY_LEVELS[Math.min(difficultyParam, DIFFICULTY_LEVELS.length - 1)];
+  const skillOverride = searchParams.get("skill");
+  const depthOverride = searchParams.get("depth");
+  const difficulty = namedBot
+    ? { ...baseLevel, skill: namedBot.skill, depth: namedBot.depth, label: namedBot.name, rating: namedBot.ratingLabel }
+    : skillOverride && depthOverride
+      ? { ...baseLevel, skill: parseInt(skillOverride), depth: parseInt(depthOverride) }
+      : baseLevel;
+
   const coach = parseCoachId(searchParams.get("coach"));
   const mode = parseGameMode(searchParams.get("mode"));
   const isDailyMode = mode === "daily";
@@ -888,6 +904,66 @@ const Game = () => {
   // The evaluation bar is strictly hidden during the active game across all modes
   // and is only revealed once the game has completely concluded (spec Section 1).
   const showEvalBar = !!gameOver;
+
+  // Bot tier gate — show upgrade screen if the named bot requires a higher tier
+  if (
+    !import.meta.env.DEV &&
+    !profileLoading &&
+    namedBot &&
+    !isBotUnlocked(namedBot, isPro, isMaster)
+  ) {
+    const tierLabel = namedBot.tier === "master" ? "Master" : "Pro";
+    const tierPrice = namedBot.tier === "master" ? "$19/mo" : "$9/mo";
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
+          <div className="container mx-auto flex items-center gap-4 px-6 py-4">
+            <button
+              type="button"
+              onClick={() => navigate("/bots")}
+              className="flex items-center gap-2 font-body text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Bots
+            </button>
+          </div>
+        </nav>
+        <div className="flex-1 flex items-center justify-center px-6">
+          <div className="text-center max-w-sm">
+            <div className="text-5xl mb-5">{namedBot.emoji}</div>
+            <div className="inline-flex items-center justify-center h-14 w-14 rounded-full bg-secondary mb-4 mx-auto">
+              <Lock className="h-6 w-6 text-foreground/60" />
+            </div>
+            <h2 className="font-display text-2xl font-bold mb-2">
+              {namedBot.name} requires {tierLabel}
+            </h2>
+            <p className="font-body text-muted-foreground mb-2 leading-relaxed">
+              "{namedBot.quote}"
+            </p>
+            <p className="font-body text-sm text-muted-foreground mb-8">
+              Upgrade to {tierLabel} ({tierPrice}) to challenge {namedBot.name} and {namedBot.tier === "master" ? "7 other bots" : "5 other bots"}.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Link
+                to="/pricing"
+                className="bg-primary px-8 py-3 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02]"
+              >
+                Upgrade to {tierLabel} — {tierPrice}
+              </Link>
+              <button
+                type="button"
+                onClick={() => navigate("/bots")}
+                className="border border-border px-8 py-3 rounded-md font-body text-sm font-medium text-foreground hover:bg-secondary transition-colors"
+              >
+                Choose another bot
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Top nav */}

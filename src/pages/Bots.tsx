@@ -1,5 +1,6 @@
-import { motion } from "framer-motion";
-import { ArrowLeft, Lock, Swords } from "lucide-react";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowLeft, Lock, Swords, X } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { BOTS, isBotUnlocked, type Bot } from "@/lib/bots";
 import { useProfile } from "@/hooks/use-profile";
@@ -16,15 +17,102 @@ const TIER_COLORS: Record<string, string> = {
   master: "text-violet-400 bg-violet-400/10 border-violet-400/30",
 };
 
-function BotCard({ bot, unlocked }: { bot: Bot; unlocked: boolean }) {
+const TIER_PRICES: Record<string, string> = {
+  pro: "$9/mo",
+  master: "$19/mo",
+};
+
+/** Full-screen upgrade modal when a locked bot is tapped */
+function LockedBotModal({ bot, onClose }: { bot: Bot; onClose: () => void }) {
+  const tierLabel = TIER_LABELS[bot.tier];
+  const tierPrice = TIER_PRICES[bot.tier] ?? "";
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 backdrop-blur-sm px-6"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.93, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.93, y: 20 }}
+          transition={{ duration: 0.25 }}
+          className="relative bg-card border border-border rounded-2xl p-8 max-w-sm w-full text-center shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Close */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+
+          {/* Bot emoji */}
+          <div className="text-5xl mb-3">{bot.emoji}</div>
+
+          {/* Lock icon */}
+          <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-secondary mb-4 mx-auto">
+            <Lock className="h-5 w-5 text-foreground/60" />
+          </div>
+
+          <h2 className="font-display text-2xl font-bold mb-2">
+            {bot.name} is locked
+          </h2>
+          <p className="font-body text-sm text-muted-foreground mb-1 italic">
+            "{bot.quote}"
+          </p>
+          <p className="font-body text-sm text-muted-foreground mb-6 mt-3 leading-relaxed">
+            <span className={`font-semibold ${TIER_COLORS[bot.tier].split(" ")[0]}`}>
+              {tierLabel}
+            </span>{" "}
+            subscription required to play {bot.name}.
+          </p>
+
+          <div className="flex flex-col gap-2">
+            <Link
+              to="/pricing"
+              className="bg-primary px-6 py-3 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02]"
+            >
+              Upgrade to {tierLabel} — {tierPrice}
+            </Link>
+            <button
+              type="button"
+              onClick={onClose}
+              className="border border-border px-6 py-3 rounded-md font-body text-sm font-medium text-foreground hover:bg-secondary transition-colors"
+            >
+              Back to bots
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+function BotCard({
+  bot,
+  unlocked,
+  onLockedClick,
+}: {
+  bot: Bot;
+  unlocked: boolean;
+  onLockedClick: (bot: Bot) => void;
+}) {
   const navigate = useNavigate();
 
-  const handlePlay = () => {
-    if (!unlocked) return;
-    // Navigate to Game page with bot's skill/depth params
-    navigate(
-      `/game?level=${bot.levelIndex}&skill=${bot.skill}&depth=${bot.depth}&bot=${bot.id}&mode=practice`
-    );
+  const handleClick = () => {
+    if (unlocked) {
+      navigate(
+        `/game?level=${bot.levelIndex}&skill=${bot.skill}&depth=${bot.depth}&bot=${bot.id}&mode=practice`
+      );
+    } else {
+      onLockedClick(bot);
+    }
   };
 
   return (
@@ -32,12 +120,12 @@ function BotCard({ bot, unlocked }: { bot: Bot; unlocked: boolean }) {
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className={`relative rounded-xl border p-5 flex flex-col gap-3 transition-all duration-200 ${
+      className={`relative rounded-xl border p-5 flex flex-col gap-3 transition-all duration-200 cursor-pointer ${
         unlocked
-          ? "border-border bg-card hover:border-foreground/25 hover:shadow-gold cursor-pointer"
-          : "border-border/50 bg-card/50 opacity-60 cursor-not-allowed"
+          ? "border-border bg-card hover:border-foreground/25 hover:shadow-gold"
+          : "border-border/40 bg-card/60 hover:border-border"
       }`}
-      onClick={unlocked ? handlePlay : undefined}
+      onClick={handleClick}
     >
       {/* Tier badge */}
       <span
@@ -46,21 +134,16 @@ function BotCard({ bot, unlocked }: { bot: Bot; unlocked: boolean }) {
         {TIER_LABELS[bot.tier]}
       </span>
 
-      {/* Lock overlay */}
-      {!unlocked && (
-        <div className="absolute inset-0 rounded-xl flex items-center justify-center">
-          <div className="bg-background/80 rounded-full p-2.5">
-            <Lock className="h-5 w-5 text-muted-foreground" />
-          </div>
-        </div>
-      )}
-
       {/* Avatar / emoji */}
-      <div className="text-3xl leading-none">{bot.emoji}</div>
+      <div className={`text-3xl leading-none ${!unlocked ? "grayscale opacity-60" : ""}`}>
+        {bot.emoji}
+      </div>
 
       {/* Name + title */}
       <div>
-        <h3 className="font-display text-lg font-bold text-foreground">{bot.name}</h3>
+        <h3 className={`font-display text-lg font-bold ${unlocked ? "text-foreground" : "text-foreground/50"}`}>
+          {bot.name}
+        </h3>
         <p className="font-body text-xs text-muted-foreground">{bot.title}</p>
       </div>
 
@@ -71,33 +154,34 @@ function BotCard({ bot, unlocked }: { bot: Bot; unlocked: boolean }) {
       </div>
 
       {/* Personality */}
-      <p className="font-body text-xs text-muted-foreground leading-relaxed">{bot.personality}</p>
+      <p className={`font-body text-xs leading-relaxed ${unlocked ? "text-muted-foreground" : "text-muted-foreground/50"}`}>
+        {bot.personality}
+      </p>
 
       {/* Quote */}
-      <p className="font-body text-xs italic text-foreground/50 border-l-2 border-primary/30 pl-2 mt-auto">
+      <p className="font-body text-xs italic text-foreground/40 border-l-2 border-primary/20 pl-2 mt-auto">
         "{bot.quote}"
       </p>
 
       {/* CTA */}
-      {unlocked && (
+      {unlocked ? (
         <button
           type="button"
-          onClick={handlePlay}
+          onClick={(e) => { e.stopPropagation(); handleClick(); }}
           className="mt-1 flex items-center justify-center gap-2 rounded-md bg-primary py-2 font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02]"
         >
           <Swords className="h-4 w-4" />
           Play
         </button>
-      )}
-
-      {!unlocked && (
-        <Link
-          to="/pricing"
-          onClick={(e) => e.stopPropagation()}
-          className="mt-1 flex items-center justify-center gap-2 rounded-md border border-border py-2 font-body text-sm font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+      ) : (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onLockedClick(bot); }}
+          className="mt-1 flex items-center justify-center gap-2 rounded-md border border-border/50 py-2 font-body text-sm font-medium text-muted-foreground hover:text-foreground hover:border-border transition-colors"
         >
-          Upgrade to {TIER_LABELS[bot.tier]}
-        </Link>
+          <Lock className="h-3.5 w-3.5" />
+          Requires {TIER_LABELS[bot.tier]}
+        </button>
       )}
     </motion.div>
   );
@@ -105,12 +189,18 @@ function BotCard({ bot, unlocked }: { bot: Bot; unlocked: boolean }) {
 
 const Bots = () => {
   const { isPro, isMaster, loading } = useProfile();
+  const [lockedBot, setLockedBot] = useState<Bot | null>(null);
 
   // In dev mode all bots are unlocked regardless of tier
   const devMode = import.meta.env.DEV;
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Locked-bot upgrade modal */}
+      {lockedBot && (
+        <LockedBotModal bot={lockedBot} onClose={() => setLockedBot(null)} />
+      )}
+
       {/* Nav */}
       <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
         <div className="container mx-auto flex items-center gap-4 px-6 py-4">
@@ -169,6 +259,7 @@ const Bots = () => {
                 key={bot.id}
                 bot={bot}
                 unlocked={devMode || isBotUnlocked(bot, isPro, isMaster)}
+                onLockedClick={setLockedBot}
               />
             ))}
           </div>
