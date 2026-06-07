@@ -1,57 +1,30 @@
 # AGENTS.md
 
-## Project Overview
-
-- Frontend: Vite + React + TypeScript.
-- UI: Tailwind + shadcn/ui + Radix primitives.
-- Tests: Vitest (unit/integration) and Playwright (E2E smoke).
-- Primary app output: `dist/`.
-
-## Environment & Setup
-
-- Use Node.js with npm (lockfiles are present).
-- Install dependencies from repo root:
-  - `npm install`
-- Postinstall scripts copy static runtime assets (Stockfish/logo). Do not skip install scripts unless debugging setup issues.
-
-## Common Commands
-
-Run from repo root:
-
-- Dev server: `npm run dev`
-- Production build: `npm run build`
-- Lint: `npm run lint`
-- Unit tests: `npm test`
-- E2E tests: `npm run test:e2e`
-- Headed E2E tests (local debugging): `npm run test:e2e:headed`
-
-## Code Guidelines
-
-- Prefer small, focused changes over broad refactors.
-- Keep TypeScript strictness intact; avoid `any` unless unavoidable and documented.
-- Reuse existing UI patterns/components before adding new abstractions.
-- Avoid touching generated/binary assets unless the task explicitly requires it.
-- Keep environment-specific values in env vars (never hardcode secrets).
-
-## Testing Expectations
-
-- For logic changes: run at least relevant unit tests and lint.
-- For UI behavior changes: run relevant E2E tests and perform a manual smoke check.
-- For release-sensitive work, use the checklist in `LAUNCH_CHECKLIST.md` and commands in `RELEASE.md`.
-- Prefer targeted test runs first; expand scope if failures indicate cross-cutting impact.
-
 ## Cursor Cloud specific instructions
 
-- Before coding, identify success criteria and how to validate them end-to-end.
-- For non-trivial UI changes, record a short demo video showing the behavior working.
-- Include concise evidence in summaries (exact commands run + pass/fail result).
-- If local environment issues block validation, document attempted remediations and remaining blocker clearly.
-- `vitest.config.ts` imports `@vitejs/plugin-react-swc` which is not listed in `package.json`. The update script handles installing it, but be aware of this mismatch if debugging test startup failures.
-- The dev server listens on port 8080 (`vite.config.ts`). Playwright E2E tests auto-start it via `webServer` config, so `npm run test:e2e` works without a running server.
-- Supabase credentials are pre-configured in `.env`. Stripe/Sentry keys are optional; the app runs without them.
+### Overview
 
-## PR / Change Hygiene
+PlatoChess Studio is a React + TypeScript chess training SPA built with Vite. It runs a single local process (the Vite dev server on port 8080). Supabase (auth/db) is consumed as a hosted cloud service; Stockfish runs client-side via WASM; Stripe and Sentry are optional.
 
-- Keep commits logically grouped with clear messages.
-- Include a short summary of changed files and behavior impact in PR description.
-- Highlight any known risks, follow-ups, or intentionally deferred work.
+### Running the dev server
+
+```bash
+npm run dev          # starts Vite on http://127.0.0.1:8080
+```
+
+### Lint / Test / Build
+
+```bash
+npm run lint         # ESLint (flat config)
+npm test             # Vitest unit tests
+npm run build        # production build
+npm run test:e2e     # Playwright E2E (auto-starts dev server; needs `npx playwright install --with-deps chromium` first)
+```
+
+### Non-obvious notes
+
+- The `postinstall` script copies Stockfish WASM binaries from `node_modules/stockfish/bin/` into `public/stockfish/`. If the chess engine fails to load in the browser, verify those files exist after `npm ci`.
+- The project uses `npm` (lockfile: `package-lock.json`). CI pins Node 20, but Node 22 also works.
+- Supabase credentials are committed in `.env` (public anon key); no extra secrets are needed for basic local dev.
+- Playwright E2E tests require Chromium to be installed (`npx playwright install --with-deps chromium`). The test config auto-starts the dev server if not already running.
+- The Vite dev server binds to `0.0.0.0:8080` (`host: true` in `vite.config.ts`).
