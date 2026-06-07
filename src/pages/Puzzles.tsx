@@ -602,7 +602,6 @@ function getSquareFromPoint(
 }
 
 const Puzzles = () => {
-  const { showValidMoves } = useTheme();
   const [searchParams] = useSearchParams();
   const [category, setCategory] = useState("all");
   const [puzzleIndex, setPuzzleIndex] = useState(0);
@@ -630,18 +629,10 @@ const Puzzles = () => {
     const personalized = mapPersonalizedPuzzles();
     return [...personalized, ...PUZZLES];
   }, []);
-  const countsByCategory = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const puzzle of allPuzzles) {
-      counts.set(puzzle.category, (counts.get(puzzle.category) ?? 0) + 1);
-    }
-    return counts;
-  }, [allPuzzles]);
 
-  const filteredPuzzles = useMemo(
-    () => (category === "all" ? allPuzzles : allPuzzles.filter((p) => p.category === category)),
-    [allPuzzles, category]
-  );
+  const filteredPuzzles = category === "all"
+    ? allPuzzles
+    : allPuzzles.filter((p) => p.category === category);
 
   const activePuzzles = filteredPuzzles.length > 0 ? filteredPuzzles : allPuzzles;
   const currentPuzzle = activePuzzles[puzzleIndex % activePuzzles.length];
@@ -910,7 +901,7 @@ const Puzzles = () => {
                   const count =
                     cat.id === "all"
                       ? allPuzzles.length
-                      : (countsByCategory.get(cat.id) ?? 0);
+                      : allPuzzles.filter((p) => p.category === cat.id).length;
                   return (
                     <button
                       key={cat.id}

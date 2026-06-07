@@ -11,15 +11,12 @@ import {
   User,
   Bot,
   Loader2,
-  ListOrdered,
-  Users,
-  MessageSquare,
-  Flag,
-  Handshake,
-  Send,
+  BarChart3,
+  Eye,
+  Sparkles,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Chess, Square, PieceSymbol } from "chess.js";
+import { Chess, Square, PieceSymbol, Color } from "chess.js";
 import {
   StockfishEngine,
   StockfishInfo,
@@ -27,17 +24,28 @@ import {
   formatEngineInitError,
 } from "@/lib/stockfish";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
-import { GameSettingsMenu } from "@/components/GameSettingsMenu";
-import { useTheme } from "@/contexts/ThemeContext";
-import { PIECE_URLS } from "@/lib/chess-constants";
+import { BoardThemeSelect } from "@/components/BoardThemeSelect";
+import { Switch } from "@/components/ui/switch";
+import { PieceImage } from "@/components/chess/PieceImage";
+import { EvalBar } from "@/components/chess/EvalBar";
+import { PlayerBanner } from "@/components/chess/PlayerBanner";
+import { MoveList } from "@/components/chess/MoveList";
+import { ForesightOverlay } from "@/components/chess/ForesightOverlay";
+import { useChessClock } from "@/hooks/use-chess-clock";
+import { computeMaterial } from "@/lib/captured-material";
+import { attackedSquares, findPins, legalOrControlledMoves } from "@/lib/chess-foresight";
+import { probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
 import {
   type CoachId,
   coachOnEval,
   COACHES,
 } from "@/lib/philosopher-coaches";
-import { reviewTone } from "@/lib/review-colors";
 import {
+  markAnalysisTransitionStart,
   saveLatestFinishedGame,
+  saveLatestGameReview,
+  scoreForLabel,
+  type ReviewedPly,
 } from "@/lib/game-review";
 import { describeGameTermination } from "@/lib/game-termination";
 import { useAuth } from "@/contexts/AuthContext";
@@ -80,36 +88,8 @@ function parseCoachId(raw: string | null): CoachId {
   return "none";
 }
 
-function parseGameMode(raw: string | null): "standard" | "daily" {
-  return raw === "daily" ? "daily" : "standard";
-}
-
-function formatDuration(ms: number): string {
-  const clamped = Math.max(0, ms);
-  const hours = Math.floor(clamped / (60 * 60 * 1000));
-  const minutes = Math.floor((clamped % (60 * 60 * 1000)) / (60 * 1000));
-  const seconds = Math.floor((clamped % (60 * 1000)) / 1000);
-  return `${hours}h ${minutes}m ${seconds}s`;
-}
-
-/** Compact clock for the player banners (m:ss, or h:mm:ss past an hour). */
-function formatClock(ms: number): string {
-  const clamped = Math.max(0, ms);
-  const totalSeconds = Math.floor(clamped / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)}`;
-  return `${minutes}:${pad(seconds)}`;
-}
-
-// Helper to get square from mouse/touch position relative to board
-function getSquareFromPoint(
-  boardEl: HTMLElement,
-  clientX: number,
-  clientY: number
-): Square | null {
+// Helper to get square from mouse/touch position relative to board (white at bottom).
+function getSquareFromPoint(boardEl: HTMLElement, clientX: number, clientY: number): Square | null {
   const rect = boardEl.getBoundingClientRect();
   const x = clientX - rect.left;
   const y = clientY - rect.top;
@@ -148,6 +128,12 @@ const Game = () => {
   const isDailyMode = mode === "daily";
   const [coachLine, setCoachLine] = useState<string | null>(null);
 
+  // Time control (minutes + Fischer increment seconds, defaults to 10|0).
+  const initialMinutes = Number(searchParams.get("min")) || 10;
+  const incrementSeconds = Number(searchParams.get("inc")) || 0;
+  const clock = useChessClock({ initialMs: initialMinutes * 60000, incrementMs: incrementSeconds * 1000 });
+  const { whiteMs, blackMs, flagged, setActive, setRunning, applyIncrement, reset: resetClock } = clock;
+
   const [game, setGame] = useState(new Chess());
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [validMoves, setValidMoves] = useState<Square[]>([]);
@@ -156,6 +142,8 @@ const Game = () => {
     { san: string; rating?: { label: string; color: string }; cpLoss?: number; bestUci?: string }[]
   >([]);
   const [eval_, setEval_] = useState<number>(0);
+  const [evalMate, setEvalMate] = useState<number | null>(null);
+  const [evalDepth, setEvalDepth] = useState(0);
   const [engineReady, setEngineReady] = useState(false);
   const [engineError, setEngineError] = useState<string | null>(null);
   const [engineLabel, setEngineLabel] = useState(STOCKFISH_VERSION_LABEL);
@@ -163,30 +151,11 @@ const Game = () => {
   const [gameOver, setGameOver] = useState<string | null>(null);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [viewFen, setViewFen] = useState<string | null>(null);
-  const [promotionSquare, setPromotionSquare] = useState<{
-    from: Square;
-    to: Square;
-  } | null>(null);
-  const [premoveEnabled, setPremoveEnabled] = useState(true);
-  const [playerElo, setPlayerElo] = useState<number | undefined>(undefined);
-  const [queuedPremove, setQueuedPremove] = useState<QueuedPremove | null>(null);
-  const [dailyMoveDeadlineMs, setDailyMoveDeadlineMs] = useState<number | null>(
-    isDailyMode ? Date.now() + DAILY_MOVE_WINDOW_MS : null
-  );
-  const [dailyClockMs, setDailyClockMs] = useState<number>(DAILY_MOVE_WINDOW_MS);
+  const [promotionSquare, setPromotionSquare] = useState<{ from: Square; to: Square } | null>(null);
 
-  // chess.com-style dashboard UI state
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("moves");
-  const [whiteClockMs, setWhiteClockMs] = useState<number>(PRACTICE_CLOCK_MS);
-  const [blackClockMs, setBlackClockMs] = useState<number>(PRACTICE_CLOCK_MS);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatDraft, setChatDraft] = useState("");
-  const [profile, setProfile] = useState<{
-    username: string | null;
-    display_name: string | null;
-    rating: number | null;
-    avatar_url: string | null;
-  } | null>(null);
+  // Tactical Foresight HUD.
+  const [foresightOn, setForesightOn] = useState(false);
+  const [hoveredSquare, setHoveredSquare] = useState<Square | null>(null);
 
   // Drag state
   const [dragging, setDragging] = useState<{
@@ -206,6 +175,9 @@ const Game = () => {
   const gameFen = game.fen();
   const gameTurn = game.turn();
   const gameIsOver = game.isGameOver();
+
+  const displayFen = viewFen || game.fen();
+  const displayGame = useMemo(() => new Chess(displayFen), [displayFen]);
 
   const allLegalDestinations = useMemo(() => {
     const s = new Set<Square>();
@@ -309,6 +281,29 @@ const Game = () => {
     return () => window.clearInterval(interval);
   }, [gameTurn, gameOver, viewFen, gameIsOver, isDailyMode]);
 
+  // --- Material + captured pieces (derived from the displayed position) ---
+  const material = useMemo(() => computeMaterial(displayFen), [displayFen]);
+  const whiteAdvantage = material.diff > 0 ? material.diff : 0;
+  const blackAdvantage = material.diff < 0 ? -material.diff : 0;
+
+  // --- Tactical Foresight derivations ---
+  // Pins depend only on the position, so they persist while Foresight is on.
+  const foresightPins = useMemo(() => {
+    if (!foresightOn) return [];
+    return [...findPins(displayGame, "w"), ...findPins(displayGame, "b")];
+  }, [foresightOn, displayGame]);
+
+  // Hover dots: green for your (white) pieces, red for the enemy's reach.
+  const foresightDots = useMemo(() => {
+    if (!foresightOn || !hoveredSquare) return { red: [] as Square[], green: [] as Square[] };
+    const piece = displayGame.get(hoveredSquare);
+    if (!piece) return { red: [], green: [] };
+    if (piece.color === "w") {
+      return { red: [], green: legalOrControlledMoves(displayFen, hoveredSquare) };
+    }
+    return { red: attackedSquares(displayGame, hoveredSquare), green: [] };
+  }, [foresightOn, hoveredSquare, displayGame, displayFen]);
+
   // Init Stockfish
   useEffect(() => {
     const engine = new StockfishEngine();
@@ -344,8 +339,10 @@ const Game = () => {
       const shouldRefreshUi = now - lastEvalUiUpdateRef.current >= EVAL_UPDATE_INTERVAL_MS;
       if (!shouldRefreshUi) return;
       if (info.mate !== undefined) {
-        setEval_(info.mate > 0 ? 9999 : -9999);
+        setEvalMate(info.mate);
+        setEval_(info.mate > 0 ? 2000 : -2000);
       } else if (info.score !== undefined) {
+        setEvalMate(null);
         setEval_(info.score);
       }
       lastEvalUiUpdateRef.current = now;
@@ -353,11 +350,29 @@ const Game = () => {
     });
   }, [gameFen, viewFen, engineReady, engineError, isPracticeMode, liveEvalNeeded]);
 
-  // Check game over (precise draw classification per spec Section 2).
+  // --- Clock wiring ---
   useEffect(() => {
-    const termination = describeGameTermination(game);
-    if (termination.over && termination.message) {
-      setGameOver(termination.message);
+    setActive(viewFen || gameOver ? null : gameTurn);
+    setRunning(engineReady && !engineError && !gameOver && !viewFen);
+  }, [viewFen, gameOver, gameTurn, engineReady, engineError, setActive, setRunning]);
+
+  useEffect(() => {
+    if (flagged && !gameOver) {
+      setGameOver(flagged === "w" ? "Black wins on time!" : "White wins on time!");
+      ChessSounds.gameOver();
+    }
+  }, [flagged, gameOver]);
+
+  // Check game over
+  useEffect(() => {
+    if (game.isCheckmate()) {
+      setGameOver(game.turn() === "w" ? "Black wins by checkmate!" : "White wins by checkmate!");
+      ChessSounds.gameOver();
+    } else if (game.isStalemate()) {
+      setGameOver("Stalemate!");
+      ChessSounds.gameOver();
+    } else if (game.isDraw()) {
+      setGameOver("Draw!");
       ChessSounds.gameOver();
     }
   }, [game]);
@@ -369,12 +384,10 @@ const Game = () => {
       pgn: game.pgn(),
       result: gameOver,
       engine: engineLabel,
-      playerElo,
-      playerColor: "w",
     });
-  }, [engineLabel, game, gameOver, playerElo]);
+  }, [engineLabel, game, gameOver]);
 
-  // Stockfish plays black (use ref for position so this callback stays stable across white moves)
+  // Stockfish plays black
   const makeEngineMove = useCallback(async () => {
     const g0 = gameRef.current;
     if (!engineRef.current || g0.isGameOver() || engineError) return;
@@ -391,7 +404,7 @@ const Game = () => {
       const result = g.move({ from, to, promotion: promotion as PieceSymbol | undefined });
       if (result) {
         playMoveSound(result, g.isCheck());
-
+        applyIncrement("b");
         setGame(g);
         setLastMove({ from, to });
         setHistoryIndex(-1);
@@ -400,17 +413,11 @@ const Game = () => {
       }
     }
     setEngineThinking(false);
-  }, [difficulty.depth, engineError]);
+  }, [difficulty.depth, engineError, applyIncrement]);
 
   useEffect(() => {
-    if (
-      engineReady &&
-      !engineError &&
-      gameTurn === "b" &&
-      !gameIsOver &&
-      !engineThinking
-    ) {
-      const timer = setTimeout(makeEngineMove, ENGINE_MOVE_DELAY_MS);
+    if (engineReady && !engineError && game.turn() === "b" && !game.isGameOver() && !engineThinking) {
+      const timer = setTimeout(makeEngineMove, 320);
       return () => clearTimeout(timer);
     }
   }, [gameTurn, gameIsOver, engineReady, engineError, engineThinking, makeEngineMove]);
@@ -422,33 +429,32 @@ const Game = () => {
       return;
     }
     const last = moveHistory[moveHistory.length - 1];
-    setCoachLine(coachOnEval(coach, eval_, null, last?.san ?? null, moveHistory.length * 13));
-  }, [coach, moveHistory, eval_]);
+    setCoachLine(coachOnEval(coach, eval_, evalMate, last?.san ?? null, moveHistory.length * 13));
+  }, [coach, moveHistory, eval_, evalMate, reviewingGame]);
 
-  const executeMove = useCallback((from: Square, to: Square, promotion?: string) => {
-    const g = new Chess(game.fen());
-    const result = g.move({ from, to, promotion: (promotion || undefined) as PieceSymbol | undefined });
+  const executeMove = useCallback(
+    (from: Square, to: Square, promotion?: string) => {
+      const g = new Chess(game.fen());
+      const result = g.move({ from, to, promotion: (promotion || undefined) as PieceSymbol | undefined });
 
-    if (result) {
-      playMoveSound(result, g.isCheck());
-
-      const moveEntry: { san: string; rating?: { label: string; color: string } } = {
-        san: result.san,
-      };
-      setMoveHistory((prev) => [...prev, moveEntry]);
-
-      setGame(g);
-      setLastMove({ from, to });
-      setSelectedSquare(null);
-      setValidMoves([]);
-      setHistoryIndex(-1);
-      setViewFen(null);
-      setPromotionSquare(null);
-      if (coach !== "none") setCoachLine(coachOnEval(coach, eval_, null, result.san, Date.now()));
-      return true;
-    }
-    return false;
-  }, [coach, eval_, game]);
+      if (result) {
+        playMoveSound(result, g.isCheck());
+        applyIncrement("w");
+        setMoveHistory((prev) => [...prev, { san: result.san }]);
+        setGame(g);
+        setLastMove({ from, to });
+        setSelectedSquare(null);
+        setValidMoves([]);
+        setHistoryIndex(-1);
+        setViewFen(null);
+        setPromotionSquare(null);
+        if (coach !== "none") setCoachLine(coachOnEval(coach, eval_, evalMate, result.san, Date.now()));
+        return true;
+      }
+      return false;
+    },
+    [coach, eval_, evalMate, game, applyIncrement],
+  );
 
   useEffect(() => {
     if (!queuedPremove || game.turn() !== "w" || engineThinking || gameOver || !premoveEnabled) return;
@@ -479,8 +485,8 @@ const Game = () => {
   }, [gameTurn, gameOver, isDailyMode, game]);
 
   const handleSquareClick = (square: Square) => {
-    if (gameOver || viewFen) return;
-    if (dragging) return; // Don't process clicks during drag
+    if (game.turn() !== "w" || engineThinking || gameOver || viewFen) return;
+    if (dragging) return;
 
     const piece = game.get(square);
 
@@ -515,8 +521,7 @@ const Game = () => {
         const movingPiece = game.get(selectedSquare);
         if (
           movingPiece?.type === "p" &&
-          ((movingPiece.color === "w" && square[1] === "8") ||
-            (movingPiece.color === "b" && square[1] === "1"))
+          ((movingPiece.color === "w" && square[1] === "8") || (movingPiece.color === "b" && square[1] === "1"))
         ) {
           setPromotionSquare({ from: selectedSquare, to: square });
           return;
@@ -564,12 +569,8 @@ const Game = () => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
       const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-      setDragging((prev) => prev ? { ...prev, x: clientX, y: clientY } : null);
-
-      if (boardRef.current) {
-        const sq = getSquareFromPoint(boardRef.current, clientX, clientY);
-        setDragOver(sq);
-      }
+      setDragging((prev) => (prev ? { ...prev, x: clientX, y: clientY } : null));
+      if (boardRef.current) setDragOver(getSquareFromPoint(boardRef.current, clientX, clientY));
     };
 
     const handleEnd = (e: MouseEvent | TouchEvent) => {
@@ -578,13 +579,11 @@ const Game = () => {
         setDragOver(null);
         return;
       }
-
       const clientX = "changedTouches" in e ? e.changedTouches[0].clientX : e.clientX;
       const clientY = "changedTouches" in e ? e.changedTouches[0].clientY : e.clientY;
       const targetSquare = getSquareFromPoint(boardRef.current, clientX, clientY);
 
       if (targetSquare && validMoves.includes(targetSquare)) {
-        // Check for promotion
         const movingPiece = game.get(dragging.square);
         if (
           movingPiece?.type === "p" &&
@@ -596,7 +595,6 @@ const Game = () => {
           executeMove(dragging.square, targetSquare);
         }
       } else {
-        // Invalid drop - snap back
         ChessSounds.illegal();
       }
 
@@ -624,37 +622,27 @@ const Game = () => {
     setLastMove(null);
     setMoveHistory([]);
     setEval_(0);
+    setEvalMate(null);
     setGameOver(null);
     setHistoryIndex(-1);
     setViewFen(null);
     setPromotionSquare(null);
     setDragging(null);
     setCoachLine(null);
-    setWhiteClockMs(PRACTICE_CLOCK_MS);
-    setBlackClockMs(PRACTICE_CLOCK_MS);
-    setChatMessages([]);
-    clearQueuedPremove();
-    if (isDailyMode) {
-      setDailyMoveDeadlineMs(Date.now() + DAILY_MOVE_WINDOW_MS);
-      setDailyClockMs(DAILY_MOVE_WINDOW_MS);
-    }
-  }, [clearQueuedPremove, isDailyMode]);
-
-  // Navigation cursor. `currentPly` = number of plies applied in the currently
-  // displayed position. When viewing the live position viewFen is null and the
-  // cursor sits at the end; the start position is represented by viewFen set to
-  // the initial board with historyIndex === -1.
-  const totalPlies = moveHistory.length;
-  const currentPly = viewFen === null ? totalPlies : historyIndex + 1;
+    setReviewSummary(null);
+    setReviewReady(false);
+    setHoveredSquare(null);
+    resetClock();
+  };
 
   const goToMove = (index: number) => {
     const fullHistory = game.history();
     const replay = new Chess();
-    for (let i = 0; i <= Math.min(index, fullHistory.length - 1); i++) {
-      replay.move(fullHistory[i]);
-    }
+    for (let i = 0; i <= Math.min(index, fullHistory.length - 1); i++) replay.move(fullHistory[i]);
     setViewFen(replay.fen());
     setHistoryIndex(index);
+    setSelectedSquare(null);
+    setValidMoves([]);
   };
 
   const goToStart = () => {
@@ -675,26 +663,92 @@ const Game = () => {
   };
 
   const goForward = () => {
-    const target = currentPly + 1;
-    if (target >= totalPlies) goToLast();
-    else goToMove(target - 1);
+    const fullHistory = game.history();
+    const current = historyIndex === -1 ? fullHistory.length : historyIndex + 1;
+    if (current < fullHistory.length) goToMove(current);
+    else {
+      setViewFen(null);
+      setHistoryIndex(-1);
+    }
   };
 
-  const handleResign = useCallback(() => {
-    if (gameOver) return;
-    ChessSounds.gameOver();
-    setGameOver("Black wins - White resigned.");
-  }, [gameOver]);
+  const analyzeFinishedGame = useCallback(async () => {
+    if (!engineRef.current || !gameOver || reviewingGame) return;
+    const history = game.history({ verbose: true });
+    if (history.length === 0) return;
 
-  const handleOfferDraw = useCallback(() => {
-    if (gameOver) return;
-    // Versus the engine, accept the offer only in a roughly balanced position.
-    if (Math.abs(eval_) <= 40) {
-      ChessSounds.gameOver();
-      setGameOver("Draw by agreement.");
-      toast.success("Stockfish accepted your draw offer.");
-    } else {
-      toast.message("Stockfish declined the draw offer.");
+    setReviewingGame(true);
+    setReviewProgress(0);
+    setReviewSummary(null);
+
+    try {
+      const engine = engineRef.current;
+      const replay = new Chess();
+      let beforeProbe = await engine.probeEval(replay.fen(), 10, 2500);
+      const reviewed: { san: string; rating?: { label: string; color: string }; cpLoss?: number; bestUci?: string }[] = [];
+      const reviewedPlies: ReviewedPly[] = [];
+
+      for (let i = 0; i < history.length; i++) {
+        const mv = history[i];
+        const side = replay.turn();
+        const fenBefore = replay.fen();
+        const best = await engine.getBestMove(fenBefore, 10);
+
+        replay.move(mv);
+        const afterProbe = await engine.probeEval(replay.fen(), 10, 2500);
+        const rated = rateMoveLikeChessCom(side, beforeProbe, afterProbe, mv, best || undefined);
+        reviewed.push({
+          san: mv.san,
+          rating: { label: rated.label, color: rated.color },
+          cpLoss: rated.cpLoss,
+          bestUci: rated.bestMove,
+        });
+        reviewedPlies.push({
+          ply: i + 1,
+          side,
+          san: mv.san,
+          label: rated.label,
+          colorClass: rated.color,
+          cpLoss: rated.cpLoss,
+          bestUci: rated.bestMove,
+          playedUci: `${mv.from}${mv.to}${mv.promotion ?? ""}`,
+          fenBefore,
+          fenAfter: replay.fen(),
+          evalBeforeCp: probeResultToCp(beforeProbe),
+          evalAfterCp: probeResultToCp(afterProbe),
+        });
+        beforeProbe = afterProbe;
+        setReviewProgress(i + 1);
+      }
+
+      const summary = reviewed.reduce<Record<string, number>>((acc, m) => {
+        const k = m.rating?.label || "Unrated";
+        acc[k] = (acc[k] || 0) + 1;
+        return acc;
+      }, {});
+      const top = ["Brilliant", "Great", "Best", "Excellent", "Good", "Inaccuracy", "Miss", "Mistake", "Blunder"]
+        .filter((k) => summary[k])
+        .map((k) => `${k}: ${summary[k]}`)
+        .join("  |  ");
+
+      setMoveHistory(reviewed);
+      setReviewSummary(top || "Review complete.");
+      setReviewReady(true);
+      const bySide = { w: [] as number[], b: [] as number[] };
+      for (const m of reviewedPlies) bySide[m.side].push(scoreForLabel(m.label));
+      const avg = (a: number[]) => (a.length ? (a.reduce((s, x) => s + x, 0) / a.length) * 100 : 0);
+      saveLatestGameReview({
+        createdAt: Date.now(),
+        pgn: game.pgn(),
+        result: gameOver || "Game complete",
+        engine: engineLabel,
+        depth: 10,
+        accuracy: { w: Number(avg(bySide.w).toFixed(1)), b: Number(avg(bySide.b).toFixed(1)) },
+        moves: reviewedPlies,
+      });
+      if (coach !== "none") setCoachLine(coachOnMoveRating(coach, "Good", "analysis", Date.now()));
+    } finally {
+      setReviewingGame(false);
     }
   }, [eval_, gameOver]);
 
@@ -743,42 +797,18 @@ const Game = () => {
     );
   };
 
-  const displayFen = viewFen || game.fen();
-  const displayGame = new Chess(displayFen);
+  const evalText =
+    evalMate != null ? `${evalMate > 0 ? "" : "-"}M${Math.abs(evalMate)}` : eval_ >= 0 ? `+${(eval_ / 100).toFixed(1)}` : (eval_ / 100).toFixed(1);
 
-  // Player banner identities. The user plays White (bottom banner); the engine
-  // (or selected philosopher coach) plays Black (top banner).
-  const userName =
-    profile?.display_name?.trim() ||
-    profile?.username?.trim() ||
-    user?.email?.split("@")[0] ||
-    "You";
-  const userRating = profile?.rating ?? 1200;
-  const opponentName = coach !== "none" ? COACHES[coach].name : "Stockfish";
-  const opponentRating = difficulty.rating;
-  const isLiveView = !viewFen && !gameOver;
-  const userTurnActive = isLiveView && gameTurn === "w";
-  const opponentTurnActive = isLiveView && gameTurn === "b";
-  const userClockLabel = isDailyMode
-    ? userTurnActive
-      ? formatDuration(dailyClockMs)
-      : "24h / move"
-    : formatClock(whiteClockMs);
-  const opponentClockLabel = isDailyMode
-    ? opponentTurnActive
-      ? formatDuration(dailyClockMs)
-      : "24h / move"
-    : formatClock(blackClockMs);
+  const moveListEntries = moveHistory.map((m) => ({ san: m.san, label: m.rating?.label }));
 
-  const evalPawns = Math.max(-10, Math.min(10, eval_ / 100));
-  const whitePercent = 50 + evalPawns * 5;
-
-  const evalDisplay =
-    Math.abs(eval_) >= 9999
-      ? eval_ > 0
-        ? "M" + (eval_ === 9999 ? "" : Math.abs(eval_))
-        : "-M"
-      : (eval_ / 100).toFixed(1);
+  const statusText = gameOver
+    ? gameOver
+    : engineThinking
+      ? "Stockfish is thinking…"
+      : game.turn() === "w"
+        ? "Your turn (White)"
+        : "Black to move";
 
   const eloPulse = useMemo(
     () => (gameOver ? eloPulseForResult(gameOver, difficulty.skill) : 0),
@@ -873,10 +903,10 @@ const Game = () => {
   // and is only revealed once the game has completely concluded (spec Section 1).
   const showEvalBar = !!gameOver;
   return (
-    <div className="flex min-h-screen flex-col bg-cc-bg text-gray-200">
-      {/* Top navigation bar */}
-      <nav className="border-b border-cc-border bg-cc-panel">
-        <div className="mx-auto flex w-full max-w-[1280px] items-center gap-4 px-4 py-3 sm:px-6">
+    <div className="min-h-screen bg-background">
+      {/* Top nav */}
+      <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
+        <div className="container mx-auto flex items-center gap-4 px-6 py-4">
           <Link
             to="/play"
             className="flex items-center gap-2 font-body text-sm text-gray-400 transition-colors hover:text-gray-100"
@@ -888,701 +918,379 @@ const Game = () => {
             {isDailyMode ? "Daily" : "Practice"}{" "}
             <span className="text-cc-green">vs Stockfish</span>
           </h1>
-          <div className="ml-auto flex items-center gap-2">
-            {isDailyMode && (
-              <span className="rounded-full border border-cc-green/50 px-3 py-1 font-body text-xs text-cc-green">
-                24h / move
-              </span>
-            )}
-            <span className="rounded-full border border-cc-border px-3 py-1 font-body text-xs text-gray-400">
-              {difficulty.label} (~{difficulty.rating})
-            </span>
-            <GameSettingsMenu />
-          </div>
+          <span className="ml-auto rounded-full border border-border px-3 py-1 font-body text-xs text-muted-foreground">
+            {difficulty.label} ({difficulty.rating})
+          </span>
         </div>
       </nav>
 
-      <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 py-6">
-        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
-          {/* Left element: opponent banner, board, and user banner stacked */}
-          <section className="order-1 flex flex-col items-center lg:col-span-8">
-            <div className="flex w-full max-w-[640px] flex-col gap-2">
-              {/* Top player banner (opponent) */}
-              <div
-                className={`flex items-center justify-between gap-3 rounded-md border bg-cc-panel px-3 py-2 transition-colors ${
-                  opponentTurnActive ? "border-cc-green/60" : "border-cc-border"
-                }`}
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-black/30">
-                    <Bot className="h-5 w-5 text-gray-300" />
+      <div className="container mx-auto max-w-[1400px] px-4 py-6">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          {/* ===== Board area (≈65%) ===== */}
+          <div className="order-1 w-full lg:flex-[0_0_64%] lg:max-w-[64%]">
+            <div className="mx-auto flex max-w-[620px] flex-col gap-2">
+              {/* Opponent banner (Black / Stockfish) */}
+              <PlayerBanner
+                name="Stockfish"
+                rating={difficulty.rating}
+                subtitle={`${engineLabel} · ${difficulty.label}`}
+                avatar={<Bot className="h-5 w-5" />}
+                color="b"
+                captured={material.capturedByBlack}
+                advantage={blackAdvantage}
+                isActive={gameTurn === "b" && !gameOver}
+                isThinking={engineThinking}
+                clockMs={blackMs}
+                flagged={flagged === "b"}
+              />
+
+              {/* Eval bar + board */}
+              <div className="flex items-stretch gap-2">
+                <EvalBar cp={eval_} mate={evalMate} />
+
+                <div className="relative flex-1 overflow-hidden rounded-xl border border-border shadow-elevated ring-1 ring-white/5">
+                  <div ref={boardRef} className="grid aspect-square w-full grid-cols-8 grid-rows-8">
+                    {Array.from({ length: 64 }, (_, i) => {
+                      const row = Math.floor(i / 8);
+                      const col = i % 8;
+                      const square = `${String.fromCharCode(97 + col)}${8 - row}` as Square;
+                      const piece = displayGame.get(square);
+                      const isDark = (row + col) % 2 === 1;
+                      const isSelected = selectedSquare === square;
+                      const isValidTarget = validMoves.includes(square);
+                      const isLastMoveSquare = lastMove?.from === square || lastMove?.to === square;
+                      const isDragSource = dragging?.square === square;
+                      const isDragTarget = dragOver === square && isValidTarget;
+                      const showAmbienceDots =
+                        !selectedSquare &&
+                        !dragging &&
+                        !foresightOn &&
+                        game.turn() === "w" &&
+                        !gameOver &&
+                        !viewFen &&
+                        allLegalDestinations.has(square);
+
+                      return (
+                        <div
+                          key={square}
+                          onClick={() => handleSquareClick(square)}
+                          onMouseDown={(e) => handleDragStart(square, e)}
+                          onTouchStart={(e) => handleDragStart(square, e)}
+                          onMouseEnter={() => foresightOn && setHoveredSquare(square)}
+                          onMouseLeave={() => foresightOn && setHoveredSquare((s) => (s === square ? null : s))}
+                          className={`relative flex select-none items-center justify-center transition-[filter] ${
+                            isDark ? "bg-chess-dark hover:brightness-110" : "bg-chess-light hover:brightness-105"
+                          } ${
+                            piece && game.turn() === "w" && piece.color === "w" && !gameOver && !viewFen
+                              ? "cursor-grab"
+                              : "cursor-pointer"
+                          }`}
+                        >
+                          {/* Last move highlight (warm yellow) */}
+                          {isLastMoveSquare && !viewFen && (
+                            <div className="absolute inset-0" style={{ backgroundColor: "rgba(245,200,68,0.30)" }} />
+                          )}
+
+                          {/* Selected highlight */}
+                          {isSelected && (
+                            <div className="absolute inset-0 z-10" style={{ backgroundColor: "rgba(245,200,68,0.45)" }} />
+                          )}
+
+                          {/* Drag target highlight */}
+                          {isDragTarget && (
+                            <div className="absolute inset-0 z-10" style={{ backgroundColor: "rgba(129,182,76,0.40)" }} />
+                          )}
+
+                          {showAmbienceDots && (
+                            <div className="pointer-events-none absolute z-[15] flex h-full w-full items-center justify-center">
+                              <div className="h-[14%] w-[14%] rounded-full bg-foreground/12 ring-1 ring-foreground/10" />
+                            </div>
+                          )}
+
+                          {/* Coords */}
+                          {col === 0 && (
+                            <span
+                              className={`absolute left-1 top-0.5 z-10 text-[9px] font-bold ${
+                                isDark ? "text-chess-light/80" : "text-chess-dark/80"
+                              }`}
+                            >
+                              {8 - row}
+                            </span>
+                          )}
+                          {row === 7 && (
+                            <span
+                              className={`absolute bottom-0 right-1 z-10 text-[9px] font-bold ${
+                                isDark ? "text-chess-light/80" : "text-chess-dark/80"
+                              }`}
+                            >
+                              {String.fromCharCode(97 + col)}
+                            </span>
+                          )}
+
+                          {/* Piece */}
+                          {piece && !isDragSource && (
+                            <PieceImage color={piece.color} type={piece.type} active={isSelected} className="z-20 h-[84%] w-[84%]" />
+                          )}
+
+                          {/* Valid move indicator (green) */}
+                          {isValidTarget && !isDragTarget && (
+                            <div className="pointer-events-none absolute z-30 flex h-full w-full items-center justify-center">
+                              {piece && !isDragSource ? (
+                                <div className="h-[84%] w-[84%] rounded-full border-[5px]" style={{ borderColor: "rgba(129,182,76,0.55)" }} />
+                              ) : (
+                                <div className="h-[30%] w-[30%] rounded-full" style={{ backgroundColor: "rgba(129,182,76,0.45)" }} />
+                              )}
+                            </div>
+                          )}
+
+                          {/* Check highlight */}
+                          {piece?.type === "k" && displayGame.inCheck() && piece.color === displayGame.turn() && (
+                            <div className="absolute inset-0 z-[5] rounded-full bg-destructive/45" />
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="min-w-0">
-                    <p className="truncate font-body text-sm font-semibold text-gray-100">
-                      {opponentName}{" "}
-                      <span className="font-normal text-gray-400">({opponentRating})</span>
-                    </p>
-                    <p className="font-body text-xs text-gray-500">{engineLabel}</p>
-                  </div>
-                  {engineThinking && (
-                    <Loader2 className="h-4 w-4 animate-spin text-cc-green" />
+
+                  {/* Tactical Foresight HUD */}
+                  {foresightOn && (
+                    <ForesightOverlay
+                      redSquares={foresightDots.red}
+                      greenSquares={foresightDots.green}
+                      pins={foresightPins}
+                      orientation="white"
+                    />
                   )}
-                </div>
-                {/* Opponent countdown clock */}
-                <div
-                  className={`rounded px-3 py-1.5 font-mono text-lg font-semibold tabular-nums ${
-                    opponentTurnActive
-                      ? "bg-white text-cc-bg"
-                      : "bg-black/40 text-gray-400"
-                  }`}
-                >
-                  {opponentClockLabel}
+
+                  {/* Dragged piece ghost */}
+                  {dragging && (
+                    <div
+                      className="drag-ghost fixed z-[100] pointer-events-none"
+                      style={{ left: dragging.x - 36, top: dragging.y - 36, width: 72, height: 72 }}
+                    >
+                      <PieceImage color={dragging.piece.color as Color} type={dragging.piece.type} active className="h-full w-full opacity-95" />
+                    </div>
+                  )}
+
+                  {/* Promotion dialog */}
+                  <AnimatePresence>
+                    {promotionSquare && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
+                      >
+                        <div className="flex gap-3 rounded-xl border border-border bg-card p-4 shadow-panel">
+                          {(["q", "r", "b", "n"] as const).map((p) => (
+                            <button
+                              key={p}
+                              onClick={() => handlePromotion(p)}
+                              className="flex h-14 w-14 items-center justify-center rounded-md border border-border bg-secondary transition-colors hover:bg-foreground/10"
+                            >
+                              <PieceImage color="w" type={p} className="h-10 w-10" />
+                            </button>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Game over overlay */}
+                  <AnimatePresence>
+                    {gameOver && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background/85 backdrop-blur-sm"
+                      >
+                        <Trophy className="h-12 w-12 text-foreground/80" />
+                        <p className="font-display text-2xl font-bold text-foreground">{gameOver}</p>
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          <button
+                            onClick={async () => {
+                              markAnalysisTransitionStart();
+                              if (!reviewReady && !reviewingGame) void analyzeFinishedGame();
+                              navigate("/analyze-game");
+                            }}
+                            disabled={reviewingGame || !engineReady || !!engineError}
+                            className="rounded-md border border-border bg-card px-4 py-2 font-body text-sm font-semibold text-foreground transition-colors hover:bg-secondary disabled:opacity-60"
+                          >
+                            {reviewingGame ? `Analyzing ${reviewProgress}/${game.history().length}` : "Analyze Game"}
+                          </button>
+                          <button
+                            onClick={resetGame}
+                            className="rounded-md bg-primary px-6 py-2.5 font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
+                          >
+                            Play Again
+                          </button>
+                          <button
+                            onClick={() => navigate("/play")}
+                            className="rounded-md border border-border bg-card px-4 py-2 font-body text-sm font-semibold text-foreground transition-colors hover:bg-secondary"
+                          >
+                            Go to Menu
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
 
-              <div className="rounded-md border border-border bg-background p-3 space-y-1">
-                <p className="font-body text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Mode
-                </p>
-                <p className="font-body text-sm text-foreground">
-                  {isDailyMode ? "Daily Chess" : "Standard Practice"}
-                </p>
-                {isDailyMode && (
-                  <p className="font-mono text-xs text-muted-foreground">
-                    Time left this move: {formatDuration(dailyClockMs)}
-                  </p>
-                )}
-                <p className="font-body text-xs text-muted-foreground">
-                  Premove: {premoveEnabled ? "On" : "Off"}{" "}
-                  {queuedPremove ? `(queued ${queuedPremove.from}-${queuedPremove.to})` : ""}
-                </p>
+              {/* Player banner (White / You) */}
+              <PlayerBanner
+                name="You"
+                rating={1500}
+                subtitle="White"
+                avatar={<User className="h-5 w-5" />}
+                color="w"
+                captured={material.capturedByWhite}
+                advantage={whiteAdvantage}
+                isActive={gameTurn === "w" && !gameOver}
+                clockMs={whiteMs}
+                flagged={flagged === "w"}
+              />
+
+              {/* Move navigation + status */}
+              <div className="mt-1 flex w-full items-stretch gap-2">
+                <button
+                  onClick={goBack}
+                  className="rounded-lg border border-border bg-card p-3 transition-colors hover:bg-secondary"
+                  aria-label="Previous move"
+                >
+                  <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+                </button>
+                <div className="flex flex-1 items-center justify-center rounded-lg border border-border bg-card px-6 font-body text-sm font-medium text-foreground">
+                  {statusText}
+                  {displayGame.inCheck() && !gameOver && <span className="ml-2 font-semibold text-destructive">Check!</span>}
+                </div>
+                <button
+                  onClick={goForward}
+                  className="rounded-lg border border-border bg-card p-3 transition-colors hover:bg-secondary"
+                  aria-label="Next move"
+                >
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </button>
               </div>
+
+              {engineError && (
+                <p className="mt-2 text-center font-body text-sm text-destructive">Engine failed to load: {engineError}</p>
+              )}
+            </div>
+          </div>
+
+          {/* ===== Unified sidebar (≈35%) ===== */}
+          <div className="order-2 w-full space-y-4 lg:flex-1">
+            {/* Engine + Foresight controls */}
+            <div className="rounded-xl border border-border bg-card p-4 shadow-soft">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="h-2 w-2 animate-pulse rounded-full bg-foreground/70" />
+                  <span className="font-body text-xs text-muted-foreground">Live analysis</span>
+                </div>
+                <span className="font-mono text-xs text-foreground">
+                  {evalText} <span className="text-muted-foreground">· d{evalDepth}</span>
+                </span>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between rounded-lg border border-border/60 bg-secondary/50 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Eye className="h-4 w-4 text-foreground/80" />
+                  <div>
+                    <p className="font-body text-sm font-semibold text-foreground">Tactical Foresight</p>
+                    <p className="font-body text-[11px] text-muted-foreground">Hover pieces to map threats & pins</p>
+                  </div>
+                </div>
+                <Switch checked={foresightOn} onCheckedChange={setForesightOn} aria-label="Toggle Tactical Foresight" />
+              </div>
+
+              {foresightOn && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 font-body text-[11px] text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-green-500/60" /> Your moves
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-red-500/60" /> Enemy attacks
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="h-3 w-3 text-red-400" /> Pins
+                  </span>
+                </div>
+              )}
             </div>
 
-            <button
-              onClick={resetGame}
-              className="w-full py-3 bg-card hover:bg-secondary rounded-lg flex items-center justify-center gap-2 transition-colors border border-border font-body text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              New Game
-            </button>
+            {/* Move history */}
+            <div className="flex flex-col rounded-xl border border-border bg-card p-4 shadow-soft">
+              <h3 className="mb-3 flex items-center gap-2 font-display text-base font-semibold">
+                <History className="h-4 w-4 text-muted-foreground" />
+                Moves
+              </h3>
+              <MoveList moves={moveListEntries} activeIndex={historyIndex} onSelect={goToMove} />
+            </div>
 
+            {/* Post-game review */}
+            {gameOver && (
+              <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-soft">
+                <button
+                  onClick={analyzeFinishedGame}
+                  disabled={reviewingGame || !engineReady || !!engineError}
+                  className="flex w-full items-center justify-center gap-2 rounded-md bg-primary py-2.5 font-body text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  {reviewingGame ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Reviewing {reviewProgress}/{game.history().length}
+                    </>
+                  ) : (
+                    <>
+                      <BarChart3 className="h-3.5 w-3.5" />
+                      Analyze Completed Game
+                    </>
+                  )}
+                </button>
+                <p className="font-body text-[11px] text-muted-foreground">
+                  Move ratings stay hidden during play and appear here after review, just like Chess.com.
+                </p>
+                {reviewSummary && <p className="font-body text-[11px] leading-relaxed text-foreground/80">{reviewSummary}</p>}
+                {reviewReady && (
+                  <button
+                    onClick={() => {
+                      markAnalysisTransitionStart();
+                      navigate("/analyze-game");
+                    }}
+                    className="w-full rounded-md border border-border py-2.5 font-body text-xs font-semibold text-foreground transition-colors hover:bg-secondary"
+                  >
+                    Open Full Game Review
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Controls */}
+            <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-soft">
+              <button
+                onClick={resetGame}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-secondary/40 py-2.5 font-body text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                New Game
+              </button>
+              <BoardThemeSelect />
+            </div>
+
+            {/* Coach */}
             {coach !== "none" && (
-              <div className="rounded-lg border border-border bg-card p-4 space-y-2">
-                <p className="font-display text-xs font-semibold text-foreground uppercase tracking-wider">
-                  Coach  -  {COACHES[coach].name}
+              <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-soft">
+                <p className="font-display text-xs font-semibold uppercase tracking-wider text-foreground">
+                  Coach · {COACHES[coach].name}
                 </p>
-                <p className="font-body text-xs text-muted-foreground leading-relaxed min-h-[3rem]">
-                  {coachLine ||
-                    "Your philosopher-coach will comment after each of your moves. Play a move to begin."}
-                </p>
-                <p className="font-body text-[10px] text-muted-foreground/80">
-                  Add <span className="font-mono">?coach={coach}</span> to the URL to return to this guide.
+                <p className="min-h-[3rem] font-body text-xs leading-relaxed text-muted-foreground">
+                  {coachLine || "Your philosopher-coach will comment after each of your moves. Play a move to begin."}
                 </p>
               </div>
             )}
           </div>
-
-          {/* Center - Board + Eval bar */}
-          <div className="lg:col-span-6 flex flex-col items-center order-1 lg:order-2">
-            <div className={`flex w-full max-w-[600px] ${showEvalBar ? "gap-2" : ""}`}>
-              {/* Eval bar - hidden while a game is actively in progress. */}
-              {showEvalBar && (
-                <div
-                  data-testid="eval-bar"
-                  className="relative flex w-6 flex-col-reverse overflow-hidden rounded-md border border-cc-border bg-black/40"
-                >
-                  <motion.div
-                    className="bg-ivory"
-                    animate={{ height: `${whitePercent}%` }}
-                    transition={{ duration: 0.4, ease: "easeOut" }}
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span
-                      className={`font-mono text-[9px] font-bold ${
-                        eval_ >= 0 ? "text-foreground" : "text-muted-foreground"
-                      }`}
-                      style={{ writingMode: "vertical-lr", transform: "rotate(180deg)" }}
-                    >
-                      {evalDisplay}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* Board */}
-              <div className="relative flex-1 overflow-hidden rounded-md border border-cc-border shadow-elevated">
-                <div
-                  ref={boardRef}
-                  className="grid grid-cols-8 grid-rows-8 aspect-square w-full"
-                >
-                  {Array.from({ length: 64 }, (_, i) => {
-                    const row = Math.floor(i / 8);
-                    const col = i % 8;
-                    const square = `${String.fromCharCode(97 + col)}${8 - row}` as Square;
-                    const piece = displayGame.get(square);
-                    const isDark = (row + col) % 2 === 1;
-                    const isSelected = selectedSquare === square;
-                    const isValidTarget = validMoves.includes(square);
-                    const isLastMoveSquare =
-                      lastMove?.from === square || lastMove?.to === square;
-                    const isDragSource = dragging?.square === square;
-                    const isDragTarget = dragOver === square && isValidTarget;
-                    const showAmbienceDots =
-                      showValidMoves &&
-                      !selectedSquare &&
-                      !dragging &&
-                      game.turn() === "w" &&
-                      !gameOver &&
-                      !viewFen &&
-                      allLegalDestinations.has(square);
-
-                    return (
-                      <div
-                        key={square}
-                        onClick={() => handleSquareClick(square)}
-                        onMouseDown={(e) => handleDragStart(square, e)}
-                        onTouchStart={(e) => handleDragStart(square, e)}
-                        className={`relative flex items-center justify-center select-none transition-colors ${
-                          isDark
-                            ? "bg-chess-dark hover:brightness-110"
-                            : "bg-chess-light hover:brightness-105"
-                        } ${piece && game.turn() === "w" && piece.color === "w" && !gameOver && !viewFen ? "cursor-grab" : "cursor-pointer"}`}
-                      >
-                        {/* Last move highlight */}
-                        {isLastMoveSquare && !viewFen && (
-                          <div
-                            className={`absolute inset-0 ${
-                              isDark ? "bg-amber-200/30" : "bg-amber-300/35"
-                            }`}
-                          />
-                        )}
-
-                        {/* Selected highlight */}
-                        {isSelected && (
-                          <div className="absolute inset-0 bg-cyan-300/30 z-10 ring-2 ring-cyan-100/50 ring-inset" />
-                        )}
-
-                        {/* Drag target highlight */}
-                        {isDragTarget && (
-                          <div className="absolute inset-0 bg-emerald-300/30 z-10 ring-2 ring-emerald-100/50 ring-inset" />
-                        )}
-
-                        {showAmbienceDots && (
-                          <div className="absolute z-[15] flex items-center justify-center w-full h-full pointer-events-none">
-                            <div className="w-[14%] h-[14%] rounded-full bg-cyan-200/30 ring-1 ring-cyan-100/20" />
-                          </div>
-                        )}
-
-                        {/* Coords */}
-                        {col === 0 && (
-                          <span
-                            className={`absolute top-0.5 left-1 text-[9px] font-bold z-10 ${
-                              isDark ? "text-chess-light/80" : "text-chess-dark/80"
-                            }`}
-                          >
-                            {8 - row}
-                          </span>
-                        )}
-                        {row === 7 && (
-                          <span
-                            className={`absolute bottom-0 right-1 text-[9px] font-bold z-10 ${
-                              isDark ? "text-chess-light/80" : "text-chess-dark/80"
-                            }`}
-                          >
-                            {String.fromCharCode(97 + col)}
-                          </span>
-                        )}
-
-                        {/* Piece */}
-                        {piece && !isDragSource && (
-                          <img
-                            src={PIECE_URLS[piece.color][piece.type]}
-                            alt={`${piece.color} ${piece.type}`}
-                            className={`w-[82%] h-[82%] object-contain drop-shadow-md select-none pointer-events-none z-20 transition-transform duration-150 ${
-                              isSelected ? "scale-110 drop-shadow-xl" : ""
-                            }`}
-                            draggable={false}
-                          />
-                        )}
-
-                        {/* Valid move indicator */}
-                        {showValidMoves && isValidTarget && !isDragTarget && (
-                          <div className="absolute z-30 flex items-center justify-center w-full h-full pointer-events-none">
-                            {piece && !isDragSource ? (
-                              <div className="w-[82%] h-[82%] rounded-full border-[5px] border-cyan-100/45" />
-                            ) : (
-                              <div className="w-[30%] h-[30%] rounded-full bg-cyan-100/45" />
-                            )}
-                          </div>
-                        )}
-
-                        {/* Check highlight */}
-                        {piece?.type === "k" &&
-                          game.inCheck() &&
-                          piece.color === game.turn() &&
-                          !viewFen && (
-                            <div className="absolute inset-0 bg-destructive/40 rounded-full z-5" />
-                          )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Dragged piece ghost */}
-                {dragging && (
-                  <div
-                    className="fixed pointer-events-none z-[100]"
-                    style={{
-                      left: dragging.x - 36,
-                      top: dragging.y - 36,
-                      width: 72,
-                      height: 72,
-                    }}
-                  >
-                    <img
-                      src={PIECE_URLS[dragging.piece.color][dragging.piece.type]}
-                      alt="dragging"
-                      className="w-full h-full object-contain drop-shadow-xl opacity-90"
-                      draggable={false}
-                    />
-                  </div>
-                )}
-
-                {/* Promotion dialog */}
-                <AnimatePresence>
-                  {promotionSquare && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center"
-                    >
-                      <div className="bg-card border border-border rounded-lg p-4 flex gap-3">
-                        {["q", "r", "b", "n"].map((p) => (
-                          <button
-                            key={p}
-                            onClick={() => handlePromotion(p)}
-                            className="w-14 h-14 rounded-md bg-secondary hover:bg-foreground/10 border border-border transition-colors flex items-center justify-center"
-                          >
-                            <img
-                              src={PIECE_URLS["w"][p]}
-                              alt={p}
-                              className="w-10 h-10"
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {gameOver && (
-                  <div className="absolute inset-0 z-[70] flex items-center justify-center bg-background/78 p-4 backdrop-blur-md">
-                    <section
-                      role="dialog"
-                      aria-modal="true"
-                      aria-labelledby="end-game-title"
-                      className="w-full max-w-md rounded-2xl border border-border/80 bg-card/95 p-5 shadow-elevated"
-                    >
-                      <p className="font-body text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-                        Match Complete
-                      </p>
-                      <h2 id="end-game-title" className="mt-1 font-display text-3xl font-semibold text-foreground">
-                        {gameOutcome}
-                      </h2>
-                      <p className="mt-2 font-body text-base font-medium text-foreground/90">{resultSummary}</p>
-                      <div className="mt-5 grid gap-2">
-                        <button
-                          ref={(node) => {
-                            gameOverActionRefs.current[0] = node;
-                          }}
-                          type="button"
-                          onClick={handleAnalyzeAction}
-                          className="group w-full rounded-lg bg-primary px-4 py-3 text-left font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform duration-150 hover:scale-[1.01] focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70"
-                        >
-                          <span className="flex items-center justify-between">
-                            Game Analysis
-                            <span className="text-[11px] font-mono opacity-85">A</span>
-                          </span>
-                        </button>
-                        <button
-                          ref={(node) => {
-                            gameOverActionRefs.current[1] = node;
-                          }}
-                          type="button"
-                          onClick={resetGame}
-                          className="w-full rounded-lg border border-border bg-card px-4 py-3 text-left font-body text-sm font-semibold text-foreground transition-transform duration-150 hover:scale-[1.01] hover:bg-secondary/70 focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
-                        >
-                          <span className="flex items-center justify-between">
-                            Rematch
-                            <span className="text-[11px] font-mono text-muted-foreground">R</span>
-                          </span>
-                        </button>
-                        <button
-                          ref={(node) => {
-                            gameOverActionRefs.current[2] = node;
-                          }}
-                          type="button"
-                          onClick={handleNewOpponentAction}
-                          className="w-full rounded-lg border border-border bg-card px-4 py-3 text-left font-body text-sm font-semibold text-foreground transition-transform duration-150 hover:scale-[1.01] hover:bg-secondary/70 focus-visible:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
-                        >
-                          <span className="flex items-center justify-between">
-                            New Opponent
-                            <span className="text-[11px] font-mono text-muted-foreground">N</span>
-                          </span>
-                        </button>
-                      </div>
-                    </section>
-                  </div>
-                )}
-              </div>
-            </div>
-
-              {/* Bottom player banner (user) */}
-              <div
-                className={`flex items-center justify-between gap-3 rounded-md border bg-cc-panel px-3 py-2 transition-colors ${
-                  userTurnActive ? "border-cc-green/60" : "border-cc-border"
-                }`}
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-cc-green/20">
-                    {profile?.avatar_url ? (
-                      <img
-                        src={profile.avatar_url}
-                        alt={userName}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <User className="h-5 w-5 text-cc-green" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate font-body text-sm font-semibold text-gray-100">
-                      {userName}{" "}
-                      <span className="font-normal text-gray-400">({userRating})</span>
-                    </p>
-                    <p className="font-body text-xs text-gray-500">White</p>
-                  </div>
-                </div>
-                {/* User countdown clock - high contrast when it is your move */}
-                <div
-                  className={`rounded px-3 py-1.5 font-mono text-lg font-semibold tabular-nums ${
-                    userTurnActive ? "bg-white text-cc-bg" : "bg-black/40 text-gray-400"
-                  }`}
-                >
-                  {userClockLabel}
-                </div>
-              </div>
-            </div>
-
-            {/* Live status + engine label */}
-            <div className="mt-3 w-full max-w-[640px] text-center">
-              <p className="font-body text-sm font-medium text-gray-200">
-                {gameOver
-                  ? gameOver
-                  : engineThinking
-                  ? "Stockfish is thinking..."
-                  : game.turn() === "w"
-                  ? isDailyMode
-                    ? `Your turn (Daily) - ${formatDuration(dailyClockMs)} left`
-                    : "Your turn (White)"
-                  : "Black to move"}
-                {game.inCheck() && !gameOver && (
-                  <span className="ml-2 font-semibold text-destructive">Check!</span>
-                )}
-              </p>
-              <p className="mt-1 font-body text-xs text-gray-500">
-                {engineLabel}
-                {showEvalBar && ` - Eval: ${evalDisplay}`}
-              </p>
-              {engineError && (
-                <p className="mt-2 font-body text-sm text-destructive">
-                  Engine failed to load: {engineError}
-                </p>
-              )}
-            </div>
-          </section>
-
-          {/* Right element: sidebar panel (tabs + content + controls) */}
-          <aside className="order-2 lg:col-span-4">
-            <div className="flex h-full flex-col overflow-hidden rounded-lg border border-cc-border bg-cc-panel lg:max-h-[calc(100vh-7rem)]">
-              {/* Header tabs */}
-              <div className="flex border-b border-cc-border">
-                {(
-                  [
-                    { id: "moves", label: "Moves", icon: ListOrdered },
-                    { id: "players", label: "Players", icon: Users },
-                    { id: "chat", label: "Chat", icon: MessageSquare },
-                  ] as const
-                ).map((tab) => {
-                  const isActive = sidebarTab === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setSidebarTab(tab.id)}
-                      className={`relative flex flex-1 items-center justify-center gap-2 py-3 font-body text-sm font-medium transition-colors ${
-                        isActive
-                          ? "text-gray-100"
-                          : "text-gray-500 hover:text-gray-300"
-                      }`}
-                    >
-                      <tab.icon className="h-4 w-4" />
-                      {tab.label}
-                      {/* Active tab underline highlight */}
-                      {isActive && (
-                        <span className="absolute inset-x-0 bottom-0 h-0.5 bg-cc-green" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Tab content */}
-              <div className="flex min-h-[280px] flex-1 flex-col overflow-hidden">
-                {/* MOVES tab: scrollable move log laid out as a turn grid */}
-                {sidebarTab === "moves" && (
-                  <div className="flex-1 overflow-y-auto scrollbar-hide">
-                    {moveHistory.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center gap-2 py-16 text-gray-500">
-                        <History className="h-8 w-8 opacity-40" />
-                        <p className="font-body text-sm">No moves yet</p>
-                        <p className="font-body text-xs">
-                          Click or drag a piece to move!
-                        </p>
-                      </div>
-                    ) : (
-                      Array.from({
-                        length: Math.ceil(moveHistory.length / 2),
-                      }).map((_, i) => {
-                        const whiteMove = moveHistory[i * 2];
-                        const blackMove = moveHistory[i * 2 + 1];
-                        return (
-                          <div
-                            key={i}
-                            className={`grid grid-cols-[2.75rem_1fr_1fr] items-stretch ${
-                              i % 2 === 0 ? "bg-black/10" : ""
-                            }`}
-                          >
-                            <div className="flex items-center justify-center py-2 font-mono text-xs text-gray-500">
-                              {i + 1}.
-                            </div>
-                            {renderMoveCell(whiteMove, i * 2)}
-                            {renderMoveCell(blackMove, i * 2 + 1)}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-
-                {/* PLAYERS tab: summaries + game controls preserved from old panel */}
-                {sidebarTab === "players" && (
-                  <div className="flex-1 space-y-4 overflow-y-auto p-4 scrollbar-hide">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-3 rounded-md border border-cc-border bg-black/20 p-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-black/30">
-                          <Bot className="h-5 w-5 text-gray-300" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate font-body text-sm font-semibold text-gray-100">
-                            {opponentName}{" "}
-                            <span className="font-normal text-gray-400">
-                              ({opponentRating})
-                            </span>
-                          </p>
-                          <p className="font-body text-xs text-gray-500">
-                            {engineLabel} - {difficulty.label}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 rounded-md border border-cc-border bg-black/20 p-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-cc-green/20">
-                          {profile?.avatar_url ? (
-                            <img
-                              src={profile.avatar_url}
-                              alt={userName}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <User className="h-5 w-5 text-cc-green" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate font-body text-sm font-semibold text-gray-100">
-                            {userName}{" "}
-                            <span className="font-normal text-gray-400">
-                              ({userRating})
-                            </span>
-                          </p>
-                          <p className="font-body text-xs text-gray-500">White</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={resetGame}
-                      className="flex w-full items-center justify-center gap-2 rounded-md border border-cc-border bg-black/20 py-3 font-body text-xs font-semibold uppercase tracking-wider text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      New Game
-                    </button>
-
-                    <BoardThemeSelect />
-
-                    {coach !== "none" && (
-                      <div className="space-y-2 rounded-md border border-cc-border bg-black/20 p-4">
-                        <p className="font-display text-xs font-semibold uppercase tracking-wider text-gray-100">
-                          Coach - {COACHES[coach].name}
-                        </p>
-                        <p className="min-h-[3rem] font-body text-xs leading-relaxed text-gray-400">
-                          {coachLine ||
-                            "Your philosopher-coach will comment after each of your moves. Play a move to begin."}
-                        </p>
-                        <p className="font-body text-[10px] text-gray-500">
-                          Add{" "}
-                          <span className="font-mono">?coach={coach}</span> to the
-                          URL to return to this guide.
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="space-y-1 rounded-md border border-cc-border bg-black/20 p-3">
-                      <p className="font-body text-[11px] uppercase tracking-wider text-gray-500">
-                        Mode
-                      </p>
-                      <p className="font-body text-sm text-gray-200">
-                        {isDailyMode ? "Daily Chess" : "Standard Practice"}
-                      </p>
-                      {isDailyMode && (
-                        <p className="font-mono text-xs text-gray-400">
-                          Time left this move: {formatDuration(dailyClockMs)}
-                        </p>
-                      )}
-                      <p className="font-body text-xs text-gray-400">
-                        Premove: {premoveEnabled ? "On" : "Off"}{" "}
-                        {queuedPremove
-                          ? `(queued ${queuedPremove.from}-${queuedPremove.to})`
-                          : ""}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* CHAT tab */}
-                {sidebarTab === "chat" && (
-                  <div className="flex flex-1 flex-col overflow-hidden">
-                    <div className="flex-1 space-y-2 overflow-y-auto p-4 scrollbar-hide">
-                      {chatMessages.length === 0 ? (
-                        <p className="py-8 text-center font-body text-sm text-gray-500">
-                          No messages yet. Say hello!
-                        </p>
-                      ) : (
-                        chatMessages.map((m) => (
-                          <div key={m.id} className="font-body text-sm">
-                            <span className="font-semibold text-cc-green">
-                              {m.author}:{" "}
-                            </span>
-                            <span className="text-gray-200">{m.text}</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        sendChat();
-                      }}
-                      className="flex items-center gap-2 border-t border-cc-border p-3"
-                    >
-                      <input
-                        value={chatDraft}
-                        onChange={(e) => setChatDraft(e.target.value)}
-                        placeholder="Send a message"
-                        className="flex-1 rounded-md border border-cc-border bg-black/30 px-3 py-2 font-body text-sm text-gray-100 placeholder:text-gray-600 focus:border-cc-green focus:outline-none"
-                      />
-                      <button
-                        type="submit"
-                        aria-label="Send message"
-                        className="rounded-md bg-cc-green p-2 text-white transition-colors hover:bg-cc-green-dark"
-                      >
-                        <Send className="h-4 w-4" />
-                      </button>
-                    </form>
-                  </div>
-                )}
-              </div>
-
-              {/* Footer control bar */}
-              <div className="space-y-2 border-t border-cc-border p-3">
-                {/* History navigation utilities */}
-                <div className="grid grid-cols-4 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={goToStart}
-                    disabled={currentPly === 0}
-                    aria-label="First move"
-                    title="First move"
-                    className="flex items-center justify-center rounded-md border border-cc-border bg-black/20 py-2.5 text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <ChevronFirst className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={goBack}
-                    disabled={currentPly === 0}
-                    aria-label="Previous move"
-                    title="Previous move"
-                    className="flex items-center justify-center rounded-md border border-cc-border bg-black/20 py-2.5 text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={goForward}
-                    disabled={currentPly >= totalPlies}
-                    aria-label="Next move"
-                    title="Next move"
-                    className="flex items-center justify-center rounded-md border border-cc-border bg-black/20 py-2.5 text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={goToLast}
-                    disabled={currentPly >= totalPlies}
-                    aria-label="Last move"
-                    title="Last move"
-                    className="flex items-center justify-center rounded-md border border-cc-border bg-black/20 py-2.5 text-gray-300 transition-colors hover:bg-black/40 hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <ChevronLast className="h-4 w-4" />
-                  </button>
-                </div>
-                {/* Major game actions */}
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={handleOfferDraw}
-                    disabled={!!gameOver}
-                    className="flex items-center justify-center gap-2 rounded-md border border-cc-border bg-black/20 py-2.5 font-body text-sm font-medium text-gray-200 transition-colors hover:bg-black/40 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <Handshake className="h-4 w-4" />
-                    Offer Draw
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleResign}
-                    disabled={!!gameOver}
-                    className="flex items-center justify-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 py-2.5 font-body text-sm font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <Flag className="h-4 w-4" />
-                    Resign
-                  </button>
-                </div>
-              </div>
-            </div>
-          </aside>
         </div>
       </main>
     </div>
