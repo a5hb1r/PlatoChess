@@ -19,6 +19,7 @@ const AnalyzeGame = lazy(() => import("./pages/AnalyzeGame.tsx"));
 const Openings = lazy(() => import("./pages/Openings.tsx"));
 const Privacy = lazy(() => import("./pages/Privacy.tsx"));
 const Terms = lazy(() => import("./pages/Terms.tsx"));
+const Pricing = lazy(() => import("./pages/Pricing.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 const queryClient = new QueryClient();
@@ -123,6 +124,14 @@ const App = () => {
                   element={
                     <Suspense fallback={<div className="min-h-screen bg-background" />}>
                       <Settings />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/pricing"
+                  element={
+                    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+                      <Pricing />
                     </Suspense>
                   }
                 />

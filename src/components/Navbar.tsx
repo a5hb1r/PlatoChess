@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { LogOut, Settings, LayoutDashboard } from "lucide-react";
-import logo from "@/assets/platochess-logo.png";
+import { LogoMark } from "@/components/LogoMark";
 import type { BoardThemeId } from "@/lib/chess-themes";
 import { BOARD_THEMES } from "@/lib/chess-themes";
 
@@ -13,19 +13,7 @@ const Navbar = () => {
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-md">
       <div className="container mx-auto flex items-center justify-between gap-3 px-6 py-3">
-        <Link to="/" className="flex items-center gap-3 min-w-0 shrink">
-          <img
-            src={logo}
-            alt=""
-            width={44}
-            height={44}
-            className="h-11 w-11 sm:h-12 sm:w-12 shrink-0 object-contain drop-shadow-[0_0_20px_rgba(255,255,255,0.08)]"
-            decoding="async"
-          />
-          <span className="font-display text-lg sm:text-xl font-semibold text-foreground tracking-tight">
-            Plato<span className="text-gradient-brand">chess</span>
-          </span>
-        </Link>
+        <LogoMark iconSize="md" textClass="text-lg sm:text-xl" />
 
         <div className="hidden lg:flex items-center gap-8 font-body text-sm text-muted-foreground">
           <a href="#features" className="transition-colors hover:text-foreground">
@@ -34,9 +22,9 @@ const Navbar = () => {
           <a href="#method" className="transition-colors hover:text-foreground">
             Method
           </a>
-          <a href="#pricing" className="transition-colors hover:text-foreground">
+          <Link to="/pricing" className="transition-colors hover:text-foreground">
             Pricing
-          </a>
+          </Link>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
