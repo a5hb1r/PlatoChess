@@ -17,12 +17,20 @@ import {
   Swords,
   Sparkles,
   Gift,
+  Loader2,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Chess, Color, Square, PieceSymbol } from "chess.js";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
 import { PIECE_URLS } from "@/lib/chess-constants";
 import { loadPersonalizedPuzzles } from "@/lib/game-review";
+import {
+  fetchPuzzleBatch,
+  loadCachedPuzzles,
+  savePuzzlesToCache,
+  CATEGORY_TO_ANGLE,
+  type LichessPuzzle,
+} from "@/lib/lichess-puzzles";
 
 interface Puzzle {
   id: string;
@@ -32,515 +40,25 @@ interface Puzzle {
   difficulty: "easy" | "medium" | "hard";
   fen: string;
   playerColor: "w" | "b";
-  solution: string[]; // Alternating player/opponent moves in UCI (e.g. "e7e8q")
+  solution: string[];
   hint: string;
-  source?: "default" | "personalized";
+  source?: "default" | "personalized" | "lichess";
 }
 
-const BASE_PUZZLES: Puzzle[] = [
-  // === FORKS ===
+// Placeholder shown while Lichess puzzles load
+const FALLBACK_PUZZLES: Puzzle[] = [
   {
-    id: "fork-1",
-    title: "Knight Fork",
-    description: "Fork the king and queen with your knight.",
-    category: "Fork",
-    difficulty: "easy",
-    fen: "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
-    playerColor: "w",
-    solution: ["h5f7"],
-    hint: "Look at f7 - it's only defended by the king.",
-  },
-  {
-    id: "fork-2",
-    title: "Royal Fork",
-    description: "Find the knight fork winning material.",
-    category: "Fork",
-    difficulty: "medium",
-    fen: "r3k2r/ppp2ppp/2n1b3/3q4/3P4/2N2N2/PPP2PPP/R1BQR1K1 w kq - 0 10",
-    playerColor: "w",
-    solution: ["f3e5", "c6e5", "d4e5"],
-    hint: "Can your knight land on a central square attacking multiple pieces?",
-  },
-  {
-    id: "fork-3",
-    title: "Pawn Fork",
-    description: "Use a pawn to fork two pieces.",
-    category: "Fork",
-    difficulty: "easy",
-    fen: "r1bqkbnr/pppppppp/8/8/3nB3/8/PPPP1PPP/RNBQK1NR w KQkq - 0 1",
-    playerColor: "w",
-    solution: ["d2d3"],
-    hint: "A simple pawn move attacks two pieces.",
-  },
-  // === PINS ===
-  {
-    id: "pin-1",
-    title: "Absolute Pin",
-    description: "Pin the knight to the king.",
-    category: "Pin",
-    difficulty: "easy",
-    fen: "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 1 2",
-    playerColor: "w",
-    solution: ["f1b5"],
-    hint: "Your bishop can pin a piece along the diagonal.",
-  },
-  {
-    id: "pin-2",
-    title: "Winning the Pinned Piece",
-    description: "The knight is pinned. Win it!",
-    category: "Pin",
-    difficulty: "medium",
-    fen: "r1bqk2r/pppp1ppp/2n2n2/1B2p3/4P3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 4 4",
-    playerColor: "w",
-    solution: ["b5c6", "d7c6"],
-    hint: "Capture the pinned piece.",
-  },
-  // === SKEWERS ===
-  {
-    id: "skewer-1",
-    title: "Bishop Skewer",
-    description: "Skewer the king and rook with your bishop.",
-    category: "Skewer",
-    difficulty: "medium",
-    fen: "6k1/5ppp/8/8/8/2B5/5PPP/4r1K1 w - - 0 1",
-    playerColor: "w",
-    solution: ["c3f6"],
-    hint: "Attack the king along the diagonal - what's behind it?",
-  },
-  // === BACK RANK ===
-  {
-    id: "backrank-1",
-    title: "Back Rank Mate",
-    description: "Deliver checkmate on the back rank.",
-    category: "Back Rank",
-    difficulty: "easy",
-    fen: "6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1",
-    playerColor: "w",
-    solution: ["e1e8"],
-    hint: "The king is trapped - can you deliver a check on the 8th rank?",
-  },
-  {
-    id: "backrank-2",
-    title: "Back Rank with Sacrifice",
-    description: "Sacrifice to set up a back rank mate.",
-    category: "Back Rank",
-    difficulty: "hard",
-    fen: "2r3k1/5ppp/8/8/8/8/4QPPP/1R4K1 w - - 0 1",
-    playerColor: "w",
-    solution: ["e2e8", "c8e8", "b1e1", "e8e1"],
-    hint: "What if you sacrifice your queen first?",
-  },
-  // === DISCOVERED ATTACKS ===
-  {
-    id: "discovered-1",
-    title: "Discovered Check",
-    description: "Move one piece to unleash an attack from another.",
-    category: "Discovery",
-    difficulty: "medium",
-    fen: "r1bqkb1r/pppppppp/2n5/8/3nP3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 1",
-    playerColor: "w",
-    solution: ["f3d4", "c6d4"],
-    hint: "Moving your knight reveals an attack.",
-  },
-  // === MATE IN 1 ===
-  {
-    id: "mate1-1",
-    title: "Queen Mate",
-    description: "Deliver checkmate in one move.",
-    category: "Mate in 1",
-    difficulty: "easy",
-    fen: "k7/8/1K6/8/8/8/8/1Q6 w - - 0 1",
-    playerColor: "w",
-    solution: ["b1a2"],
-    hint: "Where can your queen deliver check with no escape?",
-  },
-  {
-    id: "mate1-2",
-    title: "Rook Mate",
-    description: "Checkmate with your rook.",
-    category: "Mate in 1",
-    difficulty: "easy",
-    fen: "2k5/8/2K5/8/8/8/8/R7 w - - 0 1",
-    playerColor: "w",
-    solution: ["a1a8"],
-    hint: "The king is confined - deliver check on the back rank.",
-  },
-  {
-    id: "mate1-3",
-    title: "Bishop & Queen Mate",
-    description: "Use your bishop and queen together.",
-    category: "Mate in 1",
-    difficulty: "easy",
-    fen: "r1bqk2r/pppp1Bpp/2n2n2/2b1p3/4P3/8/PPPP1PPP/RNBQK1NR w KQkq - 0 1",
-    playerColor: "w",
-    solution: ["d1h5"],
-    hint: "Your bishop already controls a key diagonal.",
-  },
-  // === MATE IN 2 ===
-  {
-    id: "mate2-1",
-    title: "Smothered Mate",
-    description: "Deliver the classic smothered mate pattern.",
-    category: "Mate in 2",
-    difficulty: "hard",
-    fen: "r1b3kr/ppp3pp/8/4N3/2q5/8/PPP1QPPP/R1B2RK1 w - - 0 1",
-    playerColor: "w",
-    solution: ["e2g4", "g8h8", "e5f7"],
-    hint: "Force the king into the corner, then smother it.",
-  },
-  {
-    id: "mate2-2",
-    title: "Queen Sacrifice Mate",
-    description: "Sacrifice your queen to force checkmate.",
-    category: "Mate in 2",
-    difficulty: "hard",
-    fen: "r4rk1/ppp2ppp/8/3q4/8/1B6/PPP2PPP/R4RK1 w - - 0 1",
-    playerColor: "w",
-    solution: ["f1f7"],
-    hint: "The f7 square is weak - attack it.",
-  },
-  // === TACTICS - REMOVING THE DEFENDER ===
-  {
-    id: "remove-def-1",
-    title: "Remove the Defender",
-    description: "Capture the piece that guards a key square.",
-    category: "Removing Defender",
-    difficulty: "medium",
-    fen: "r1b1kb1r/pppp1ppp/2n2n2/4p3/2B1P1q1/5N2/PPPP1PPP/RNBQR1K1 w kq - 0 1",
-    playerColor: "w",
-    solution: ["c4f7", "e8f7", "f3g5", "f7g8"],
-    hint: "If f7 falls, what happens next?",
-  },
-  // === DEFLECTION ===
-  {
-    id: "deflect-1",
-    title: "Deflection",
-    description: "Force a defending piece away from its duty.",
-    category: "Deflection",
-    difficulty: "hard",
-    fen: "r4rk1/ppp2ppp/3b4/3Pp1q1/8/1B3N2/PPP2PPP/R2Q1RK1 w - - 0 1",
-    playerColor: "w",
-    solution: ["f3g5"],
-    hint: "Attack with your knight - what does it threaten?",
-  },
-  // === ENDGAME ===
-  {
-    id: "endgame-1",
-    title: "King & Pawn Endgame",
-    description: "Promote your pawn - find the right king move.",
-    category: "Endgame",
-    difficulty: "medium",
-    fen: "8/8/8/8/8/4K3/4P3/4k3 w - - 0 1",
-    playerColor: "w",
-    solution: ["e3d3"],
-    hint: "Opposition is key - keep your king in front of the pawn.",
-  },
-  {
-    id: "endgame-2",
-    title: "Rook Endgame",
-    description: "Cut off the enemy king with your rook.",
-    category: "Endgame",
-    difficulty: "medium",
-    fen: "8/8/4k3/8/4P3/8/8/4K1R1 w - - 0 1",
-    playerColor: "w",
-    solution: ["g1g6"],
-    hint: "Use your rook to cut off the king along a rank.",
-  },
-  {
-    id: "mate1-rook-h1",
-    title: "Corner Rook Mate",
-    description: "Mate in one with the rook.",
-    category: "Mate in 1",
-    difficulty: "easy",
-    fen: "7k/8/5K2/8/8/8/8/R7 w - - 0 1",
-    playerColor: "w",
-    solution: ["a1h1"],
-    hint: "Trap the king on the h-file.",
-  },
-  {
-    id: "fork-queen-knight",
-    title: "Bxf7+ Tactics",
-    description: "Strike f7 - the king must respond awkwardly.",
-    category: "Fork",
-    difficulty: "medium",
-    fen: "r3kb1r/pppp1ppp/2n2n2/4q3/2B1P3/8/PPPP1PPP/RNBQK1NR w KQkq - 0 1",
-    playerColor: "w",
-    solution: ["c4f7"],
-    hint: "The bishop capture on f7 comes with check.",
-  },
-  {
-    id: "skewer-rook",
-    title: "Rook Skewer",
-    description: "Skewer king and bishop on the file.",
-    category: "Skewer",
-    difficulty: "easy",
-    fen: "8/8/4k3/8/8/8/4b3/R3K3 w - - 0 1",
-    playerColor: "w",
-    solution: ["a1a6"],
-    hint: "Check the king - the bishop is behind.",
-  },
-  {
-    id: "discovery-rook",
-    title: "Rook Discovery",
-    description: "Unleash a rook check by moving the knight.",
-    category: "Discovery",
-    difficulty: "medium",
-    fen: "3r2k1/ppp2ppp/8/4n3/8/2N1B3/PPP2PPP/2KR4 w - - 0 1",
-    playerColor: "w",
-    solution: ["c3d5", "d8d5", "d1d5"],
-    hint: "Jump into the center with tempo.",
-  },
-  {
-    id: "zwischenzug-1",
-    title: "Zwischenzug",
-    description: "A stronger capture comes before recapturing.",
-    category: "Zwischenzug",
-    difficulty: "medium",
-    fen: "r1bqkb1r/pppp1ppp/2n5/4p3/2BnP3/8/PPPP1PPP/RNBQK1NR w KQkq - 0 1",
-    playerColor: "w",
-    solution: ["c4f7", "e8e7", "d1h5"],
-    hint: "Bxf7+ first; after the king steps up, bring the queen into the attack.",
-  },
-  {
-    id: "sac-1",
-    title: "Seventh-Rank Invasion",
-    description: "Crash through on the seventh rank with the rook.",
-    category: "Sacrifice",
-    difficulty: "medium",
-    fen: "3r2k1/ppp2ppp/8/8/8/2R5/PPP2PPP/2KR4 w - - 0 1",
-    playerColor: "w",
-    solution: ["c3c7", "d8d7", "c7d7"],
-    hint: "Capture on c7, meet the recapture, then take the defender.",
-  },
-  {
-    id: "endgame-opp",
-    title: "Opposition",
-    description: "Seize the opposition to promote.",
-    category: "Endgame",
-    difficulty: "medium",
-    fen: "8/4k3/8/3P4/8/8/3K4/8 w - - 0 1",
-    playerColor: "w",
-    solution: ["d2e3"],
-    hint: "When black plays Ke7, you want the distant opposition.",
-  },
-  {
-    id: "mate2-anastasia",
-    title: "Anastasia's Mate Pattern",
-    description: "Knight and rook cooperate for mate.",
-    category: "Mate in 2",
-    difficulty: "hard",
-    fen: "5rk1/5ppp/8/8/3N4/8/PPP2PPP/R5K1 w - - 0 1",
-    playerColor: "w",
-    solution: ["a1e1", "f8e8", "e1e8"],
-    hint: "Open the e-file - the knight covers escape squares.",
-  },
-  {
-    id: "black-fork-1",
-    title: "Black to Play - Fork",
-    description: "Fork two white pieces as Black.",
-    category: "Fork",
-    difficulty: "medium",
-    fen: "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNBQK1NR b KQkq - 0 1",
-    playerColor: "b",
-    solution: ["f6e4"],
-    hint: "The central knight eyes the bishop and a pawn.",
-  },
-  {
-    id: "mate1-black",
-    title: "Black to Mate",
-    description: "Deliver mate in one as Black.",
-    category: "Mate in 1",
-    difficulty: "easy",
-    fen: "7k/5ppp/8/8/8/8/5q2/6K1 b - - 0 1",
-    playerColor: "b",
-    solution: ["f2f1"],
-    hint: "The white king is very weak.",
-  },
-  {
-    id: "tactics-double-attack",
-    title: "Queen Double Attack",
-    description: "One queen move wins material.",
+    id: "loading-placeholder",
+    title: "Loading puzzles…",
+    description: "Fetching real tactics from Lichess.",
     category: "Tactics",
     difficulty: "medium",
-    fen: "r4rk1/ppp2ppp/8/3q4/8/2Q5/PPP2PPP/R1B1KB1R w KQ - 0 1",
+    fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     playerColor: "w",
-    solution: ["c3g7"],
-    hint: "Check and attack - g7 cannot be defended in time.",
-  },
-  {
-    id: "backrank-3",
-    title: "Rook Lift",
-    description: "Exploit weak back rank coordination.",
-    category: "Back Rank",
-    difficulty: "medium",
-    fen: "6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1",
-    playerColor: "w",
-    solution: ["e1e8"],
-    hint: "Classic back rank - pawns lock their own king.",
+    solution: ["e2e4"],
+    hint: "Puzzles are loading from Lichess.",
   },
 ];
-
-type TransformName = "identity" | "flipH" | "flipV" | "rot180";
-
-function transformSquare(sq: Square, t: TransformName): Square {
-  const file = sq.charCodeAt(0) - 97;
-  const rank = parseInt(sq[1], 10) - 1;
-  let f = file;
-  let r = rank;
-  if (t === "flipH") f = 7 - file;
-  if (t === "flipV") r = 7 - rank;
-  if (t === "rot180") {
-    f = 7 - file;
-    r = 7 - rank;
-  }
-  return `${String.fromCharCode(97 + f)}${r + 1}` as Square;
-}
-
-function transformUci(uci: string, t: TransformName): string {
-  const from = transformSquare(uci.slice(0, 2) as Square, t);
-  const to = transformSquare(uci.slice(2, 4) as Square, t);
-  return `${from}${to}${uci.length > 4 ? uci[4] : ""}`;
-}
-
-function swapColor(ch: string): string {
-  if (ch >= "a" && ch <= "z") return ch.toUpperCase();
-  if (ch >= "A" && ch <= "Z") return ch.toLowerCase();
-  return ch;
-}
-
-function flipColorFenBoard(board: string): string {
-  return board
-    .split("/")
-    .map((rank) => rank.split("").map(swapColor).join(""))
-    .join("/");
-}
-
-function transformFen(fen: string, t: TransformName, colorSwap: boolean): string {
-  const parts = fen.split(" ");
-  if (parts.length < 4) return fen;
-  const [board, turn, castling, ep, half = "0", full = "1"] = parts;
-  const rows = board.split("/");
-  const expanded = rows.map((row) => {
-    const out: string[] = [];
-    for (const ch of row) {
-      if (ch >= "1" && ch <= "8") {
-        const n = parseInt(ch, 10);
-        for (let i = 0; i < n; i++) out.push("1");
-      } else {
-        out.push(ch);
-      }
-    }
-    return out;
-  });
-
-  const dst = Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => "1"));
-  for (let r = 0; r < 8; r++) {
-    for (let f = 0; f < 8; f++) {
-      let rf = f;
-      let rr = r;
-      if (t === "flipH") rf = 7 - f;
-      if (t === "flipV") rr = 7 - r;
-      if (t === "rot180") {
-        rf = 7 - f;
-        rr = 7 - r;
-      }
-      dst[rr][rf] = expanded[r][f];
-    }
-  }
-
-  const compact = dst
-    .map((rank) => {
-      let s = "";
-      let n = 0;
-      for (const ch of rank) {
-        if (ch === "1") n++;
-        else {
-          if (n) s += String(n);
-          n = 0;
-          s += ch;
-        }
-      }
-      if (n) s += String(n);
-      return s;
-    })
-    .join("/");
-
-  const mappedBoard = colorSwap ? flipColorFenBoard(compact) : compact;
-  const mappedTurn = colorSwap ? (turn === "w" ? "b" : "w") : turn;
-  // Keep castling/ep simple; many puzzles don't rely on them.
-  return `${mappedBoard} ${mappedTurn} ${castling} ${ep} ${half} ${full}`;
-}
-
-function transformsForCategory(category: string): TransformName[] {
-  // Preserve tactical motif fidelity for forcing mates.
-  if (category === "Mate in 1" || category === "Mate in 2") return ["identity", "flipH"];
-  if (category === "Back Rank" || category === "Endgame") return ["identity", "flipH", "rot180"];
-  return ["identity", "flipH", "flipV", "rot180"];
-}
-
-function transformWeight(t: TransformName): number {
-  if (t === "identity") return 4;
-  if (t === "flipH") return 3;
-  return 1;
-}
-
-function isPuzzlePlayable(p: Puzzle): boolean {
-  try {
-    const g = new Chess(p.fen);
-    if (g.turn() !== (p.playerColor as Color)) return false;
-    for (const uci of p.solution) {
-      const move = g.move({
-        from: uci.slice(0, 2) as Square,
-        to: uci.slice(2, 4) as Square,
-        promotion: (uci.length > 4 ? uci[4] : undefined) as "q" | "r" | "b" | "n" | undefined,
-      });
-      if (!move) return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function generatePuzzleBank(base: Puzzle[], target = 2400): Puzzle[] {
-  const out: Puzzle[] = [];
-  const seen = new Set<string>();
-  let serial = 0;
-  let guard = 0;
-
-  while (out.length < target && guard < target * 50) {
-    const p = base[serial % base.length];
-    const transforms = transformsForCategory(p.category);
-    const weighted: TransformName[] = transforms.flatMap((t) =>
-      Array.from({ length: transformWeight(t) }, () => t)
-    );
-    const t = weighted[Math.floor(serial / base.length) % weighted.length];
-    const colorSwap = Math.floor(serial / (base.length * weighted.length)) % 2 === 1;
-    const playerColor = colorSwap ? (p.playerColor === "w" ? "b" : "w") : p.playerColor;
-    const solution = p.solution.map((u) => transformUci(u, t));
-    const fen = transformFen(p.fen, t, colorSwap);
-    const key = `${fen}|${solution.join(",")}|${p.category}`;
-    if (!seen.has(key)) {
-      const v: Puzzle = {
-        ...p,
-        id: `${p.id}-v${serial}`,
-        title: `${p.title} - Variation ${serial + 1}`,
-        fen,
-        playerColor,
-        solution,
-      };
-      if (isPuzzlePlayable(v)) {
-        out.push(v);
-        seen.add(key);
-      }
-    }
-    serial++;
-    guard++;
-  }
-  return out;
-}
-
-const PUZZLES: Puzzle[] = generatePuzzleBank(BASE_PUZZLES, 2600);
 
 function mapPersonalizedPuzzles(): Puzzle[] {
   return loadPersonalizedPuzzles().map((puzzle) => {
@@ -571,10 +89,8 @@ const CATEGORIES = [
   { id: "Mate in 1", label: "Mate in 1", icon: Trophy },
   { id: "Mate in 2", label: "Mate in 2", icon: Flame },
   { id: "Endgame", label: "Endgame", icon: Target },
-  { id: "Discovery", label: "Discovery", icon: Lightbulb },
-  { id: "Removing Defender", label: "Remove Defender", icon: Shield },
+  { id: "Discovery", label: "Discovery", icon: Sparkles },
   { id: "Deflection", label: "Deflection", icon: Swords },
-  { id: "Zwischenzug", label: "Zwischenzug", icon: Sparkles },
   { id: "Sacrifice", label: "Sacrifice", icon: Gift },
   { id: "Tactics", label: "Tactics", icon: Zap },
 ];
@@ -598,6 +114,10 @@ function getSquareFromPoint(
   return `${String.fromCharCode(97 + col)}${8 - row}` as Square;
 }
 
+function mapLichess(p: LichessPuzzle): Puzzle {
+  return { ...p };
+}
+
 const Puzzles = () => {
   const [searchParams] = useSearchParams();
   const [category, setCategory] = useState("all");
@@ -611,6 +131,9 @@ const Puzzles = () => {
   const [showHint, setShowHint] = useState(false);
   const [solved, setSolved] = useState<Set<string>>(new Set());
   const [streak, setStreak] = useState(0);
+  const [lichessPuzzles, setLichessPuzzles] = useState<Puzzle[]>([]);
+  const [loadingPuzzles, setLoadingPuzzles] = useState(true);
+  const fetchingRef = useRef(false);
 
   // Drag state
   const [dragging, setDragging] = useState<{
@@ -622,10 +145,36 @@ const Puzzles = () => {
   const [dragOver, setDragOver] = useState<Square | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
 
+  // Load cached puzzles immediately, then fetch fresh ones in background
+  useEffect(() => {
+    const cached = loadCachedPuzzles();
+    if (cached.length > 0) {
+      setLichessPuzzles(cached.map(mapLichess));
+      setLoadingPuzzles(false);
+    }
+
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+
+    fetchPuzzleBatch(30).then((fresh) => {
+      if (fresh.length > 0) {
+        savePuzzlesToCache(fresh);
+        setLichessPuzzles((prev) => {
+          const existingIds = new Set(prev.map((p) => p.id));
+          const newOnes = fresh.map(mapLichess).filter((p) => !existingIds.has(p.id));
+          return [...newOnes, ...prev];
+        });
+      }
+      setLoadingPuzzles(false);
+      fetchingRef.current = false;
+    });
+  }, []);
+
   const allPuzzles = useMemo(() => {
     const personalized = mapPersonalizedPuzzles();
-    return [...personalized, ...PUZZLES];
-  }, []);
+    const pool = loadingPuzzles && lichessPuzzles.length === 0 ? FALLBACK_PUZZLES : lichessPuzzles;
+    return [...personalized, ...pool];
+  }, [lichessPuzzles, loadingPuzzles]);
 
   const filteredPuzzles = category === "all"
     ? allPuzzles
@@ -831,7 +380,26 @@ const Puzzles = () => {
   }, [dragging, validMoves, executePlayerMove, flipped]);
 
   const nextPuzzle = () => {
-    setPuzzleIndex((i) => (i + 1) % activePuzzles.length);
+    const next = (puzzleIndex + 1) % activePuzzles.length;
+    setPuzzleIndex(next);
+    // Pre-fetch more puzzles when pool gets low
+    if (lichessPuzzles.length - next < 10 && !fetchingRef.current) {
+      fetchingRef.current = true;
+      const angle = category !== "all" && category !== "From My Games"
+        ? CATEGORY_TO_ANGLE[category]
+        : undefined;
+      fetchPuzzleBatch(20, angle).then((fresh) => {
+        if (fresh.length > 0) {
+          savePuzzlesToCache(fresh);
+          setLichessPuzzles((prev) => {
+            const existingIds = new Set(prev.map((p) => p.id));
+            const newOnes = fresh.map(mapLichess).filter((p) => !existingIds.has(p.id));
+            return [...prev, ...newOnes];
+          });
+        }
+        fetchingRef.current = false;
+      });
+    }
   };
 
   const retryPuzzle = () => {
@@ -876,6 +444,12 @@ const Puzzles = () => {
                 <Flame className="w-4 h-4" />
                 {streak}
               </div>
+            )}
+            {loadingPuzzles && (
+              <span className="flex items-center gap-1 font-body text-xs text-muted-foreground">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Loading…
+              </span>
             )}
             <span className="font-body text-xs text-muted-foreground border border-border rounded-full px-3 py-1">
               {solved.size}/{allPuzzles.length} solved
