@@ -21,7 +21,8 @@ import {
 } from "lucide-react";
 import { Chess, Square, PieceSymbol } from "chess.js";
 import { PIECE_URLS } from "@/lib/chess-constants";
-import { MoveGlyph, isMistakeLabel } from "@/components/chess/MoveGlyph";
+import { MoveGlyph } from "@/components/chess/MoveGlyph";
+import { isMistakeLabel } from "@/lib/move-glyph-meta";
 import { playMoveSound } from "@/lib/sounds";
 import {
   consumeAnalysisTransitionMs,
