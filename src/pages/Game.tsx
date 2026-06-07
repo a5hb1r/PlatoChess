@@ -55,7 +55,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/use-profile";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getBotById, isBotUnlocked } from "@/lib/bots";
-import { PIECE_URLS } from "@/lib/chess-constants";
 import {
   getPersonality,
   getBotLine,
@@ -83,8 +82,6 @@ const EVAL_UPDATE_INTERVAL_MS = 120;
 // the game) and visually indicates whose turn it is.
 const PRACTICE_CLOCK_MS = 10 * 60 * 1000;
 
-type SidebarTab = "moves" | "players" | "chat";
-type ChatMessage = { id: number; author: string; text: string };
 
 const DAILY_MOVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PREMOVE_STORAGE_KEY = "plato:premove-enabled";
@@ -232,10 +229,6 @@ const Game = () => {
   // Daily mode per-move clock display (ms remaining for current move)
   const [dailyClockMs, setDailyClockMs] = useState<number>(DAILY_MOVE_WINDOW_MS);
 
-  // Online / human-vs-human chat
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatDraft, setChatDraft] = useState("");
-
   const boardRef = useRef<HTMLDivElement>(null);
   const gameOverActionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const lastEvalUiUpdateRef = useRef(0);
@@ -249,20 +242,6 @@ const Game = () => {
 
   const displayFen = viewFen || game.fen();
   const displayGame = useMemo(() => new Chess(displayFen), [displayFen]);
-
-  // Eval bar: convert centipawn score to a 0-100 white percentage
-  const whitePercent = useMemo(() => {
-    if (evalMate !== null) return evalMate > 0 ? 100 : 0;
-    const cp = Math.max(-1000, Math.min(1000, eval_));
-    return Math.round(50 + (cp / 1000) * 45);
-  }, [eval_, evalMate]);
-
-  // Human-readable eval string (+1.23, M5, etc.)
-  const evalDisplay = useMemo(() => {
-    if (evalMate !== null) return `M${Math.abs(evalMate)}`;
-    const sign = eval_ >= 0 ? "+" : "";
-    return `${sign}${(eval_ / 100).toFixed(2)}`;
-  }, [eval_, evalMate]);
 
   const allLegalDestinations = useMemo(() => {
     const s = new Set<Square>();
@@ -404,10 +383,6 @@ const Game = () => {
     return () => engine.destroy();
   }, [difficulty.skill]);
 
-  // Eval is computed for the coach, for board scrubbing, and once the game has
-  // concluded (so the bar can be revealed). It is intentionally NOT surfaced to
-  // the user while a game is actively in progress (spec Section 1).
-  const liveEvalNeeded = isPracticeMode || coach !== "none" || !!viewFen || !!gameOver;
   useEffect(() => {
     if (!isPracticeMode || !engineReady || !engineRef.current || engineError) return;
     const fen = viewFen || gameFen;
@@ -424,7 +399,6 @@ const Game = () => {
         setEvalMate(null);
         setEval_(info.score);
       }
-      lastEvalUiUpdateRef.current = now;
       lastEvalUiUpdateRef.current = now;
     });
   }, [gameFen, viewFen, engineReady, engineError, isPracticeMode]);
@@ -878,16 +852,6 @@ const Game = () => {
     }
   }, [eval_, gameOver]);
 
-  const sendChat = () => {
-    const text = chatDraft.trim();
-    if (!text) return;
-    setChatMessages((prev) => [
-      ...prev,
-      { id: Date.now(), author: "You", text },
-    ]);
-    setChatDraft("");
-  };
-
   // A single move cell in the sidebar move log. Highlights with a distinct
   // background when it is the position currently shown on the board.
   const renderMoveCell = (
@@ -1024,10 +988,6 @@ const Game = () => {
       window.removeEventListener("keydown", onOverlayKeyDown);
     };
   }, [gameOver, handleAnalyzeAction, handleNewOpponentAction, resetGame]);
-
-  // The evaluation bar is strictly hidden during the active game across all modes
-  // and is only revealed once the game has completely concluded (spec Section 1).
-  const showEvalBar = !!gameOver;
 
   // Bot tier gate — show upgrade screen if the named bot requires a higher tier
   if (

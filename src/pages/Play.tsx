@@ -102,14 +102,6 @@ const STOCKFISH_LEVELS = [
   { label: "Master", rating: "~1850", level: 5 },
 ];
 
-const COACH_MATCHUPS = [
-  { id: "plato", name: "Plato", style: "Strategic foundations", level: 1 },
-  { id: "marcus", name: "Marcus Aurelius", style: "Stoic positional play", level: 2 },
-  { id: "seneca", name: "Seneca", style: "Practical decision-making", level: 2 },
-  { id: "nietzsche", name: "Nietzsche", style: "Dynamic imbalances", level: 3 },
-  { id: "confucius", name: "Confucius", style: "Harmony and structure", level: 2 },
-] as const;
-
 const Play = () => {
   const { user } = useAuth();
   const [selectedVariant, setSelectedVariant] = useState<string | null>(null);
