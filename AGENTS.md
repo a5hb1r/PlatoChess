@@ -46,13 +46,9 @@ Run from repo root:
 - For non-trivial UI changes, record a short demo video showing the behavior working.
 - Include concise evidence in summaries (exact commands run + pass/fail result).
 - If local environment issues block validation, document attempted remediations and remaining blocker clearly.
-- The `postinstall` script copies Stockfish WASM binaries from `node_modules/stockfish/bin/` into `public/stockfish/`.
-- The dev server listens on port **8080** (not the Vite default 5173). E2E tests also target this port.
-- `vitest.config.ts` imports `@vitejs/plugin-react-swc`; ensure it is present in devDependencies before running tests.
-- No local databases or Docker services are needed. Supabase is cloud-hosted; credentials are in `.env`.
-- Playwright E2E tests have `reuseExistingServer: true`, so start `npm run dev` before running `npm run test:e2e` to avoid waiting for a fresh server spawn.
-- Playwright E2E tests require Chromium (`npx playwright install --with-deps chromium`) before the first run.
-- Stripe and Sentry keys are optional; the app can run without them for local testing.
+- `vitest.config.ts` imports `@vitejs/plugin-react-swc` which is not listed in `package.json`. The update script handles installing it, but be aware of this mismatch if debugging test startup failures.
+- The dev server listens on port 8080 (`vite.config.ts`). Playwright E2E tests auto-start it via `webServer` config, so `npm run test:e2e` works without a running server.
+- Supabase credentials are pre-configured in `.env`. Stripe/Sentry keys are optional; the app runs without them.
 
 ## PR / Change Hygiene
 
