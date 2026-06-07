@@ -41,6 +41,8 @@ import { buildOpeningSuite, lineToFen, openingLinePreview, type OpeningSuiteData
 import { buildPersonalizedPuzzles } from "@/lib/personalized-puzzles";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useProfile } from "@/hooks/use-profile";
+import { useAuth } from "@/contexts/AuthContext";
+import { recordPlacementResult } from "@/lib/placement";
 import { Lock } from "lucide-react";
 
 function squareCenter(square: Square): { x: number; y: number } {
@@ -106,7 +108,8 @@ function TheoryNode({
 
 export default function AnalyzeGame() {
   const navigate = useNavigate();
-  const { isPro, loading: profileLoading } = useProfile();
+  const { user } = useAuth();
+  const { isPro, loading: profileLoading, profile, placementGamesRemaining } = useProfile();
   const engineRef = useRef<StockfishEngine | null>(null);
   const [report, setReport] = useState<GameReviewReport | null>(() => loadLatestGameReview());
   const [reviewing, setReviewing] = useState(false);
@@ -312,6 +315,25 @@ export default function AnalyzeGame() {
         saveLatestGameReview(nextReport);
         setReport(nextReport);
         setSelectedPly(nextReport.moves.length);
+
+        // Placement: adjust rating based on the player's accuracy this game
+        if (
+          user &&
+          profile &&
+          placementGamesRemaining !== null &&
+          placementGamesRemaining > 0 &&
+          profile.onboarding_elo_bracket
+        ) {
+          // Use white accuracy (player is always white vs Stockfish)
+          const accuracy = nextReport.accuracy?.w ?? 50;
+          recordPlacementResult({
+            userId: user.id,
+            accuracy,
+            currentRating: profile.rating,
+            bracket: profile.onboarding_elo_bracket,
+            placementGamesRemaining,
+          });
+        }
       })
       .catch((err) => {
         if (cancelled) return;

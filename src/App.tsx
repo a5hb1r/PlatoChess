@@ -7,6 +7,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { GuestOnboarding } from "@/components/GuestOnboarding";
+import { GuestBanner } from "@/components/GuestBanner";
 import Index from "./pages/Index.tsx";
 const Play = lazy(() => import("./pages/Play.tsx"));
 const Game = lazy(() => import("./pages/Game.tsx"));
@@ -37,6 +39,8 @@ const App = () => {
         <BrowserRouter>
           <ThemeProvider>
             <AuthProvider>
+              <GuestOnboarding onDone={() => {}} />
+              <GuestBanner />
               <Routes>
                 <Route path="/" element={<Index />} />
                 <Route

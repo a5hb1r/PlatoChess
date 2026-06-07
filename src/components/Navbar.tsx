@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { LogOut, Settings, LayoutDashboard } from "lucide-react";
+import { useProfile } from "@/hooks/use-profile";
+import { LogOut, Settings, LayoutDashboard, Swords } from "lucide-react";
 import { LogoMark } from "@/components/LogoMark";
 import type { BoardThemeId } from "@/lib/chess-themes";
 import { BOARD_THEMES } from "@/lib/chess-themes";
@@ -9,11 +10,25 @@ import { BOARD_THEMES } from "@/lib/chess-themes";
 const Navbar = () => {
   const { user, signOut } = useAuth();
   const { boardTheme, setBoardTheme } = useTheme();
+  const { placementGamesRemaining, profile } = useProfile();
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-md">
       <div className="container mx-auto flex items-center justify-between gap-3 px-6 py-3">
-        <LogoMark iconSize="md" textClass="text-lg sm:text-xl" />
+        <div className="flex items-center gap-3 min-w-0">
+          <LogoMark iconSize="md" textClass="text-lg sm:text-xl" />
+          {placementGamesRemaining !== null && placementGamesRemaining > 0 && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 font-body text-[11px] font-semibold text-amber-400">
+              <Swords className="h-3 w-3" />
+              Placement · {placementGamesRemaining} left
+            </span>
+          )}
+          {placementGamesRemaining === 0 && profile?.rating && (
+            <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 font-body text-[11px] font-semibold text-primary">
+              {profile.rating} ELO
+            </span>
+          )}
+        </div>
 
         <div className="hidden lg:flex items-center gap-8 font-body text-sm text-muted-foreground">
           <a href="#features" className="transition-colors hover:text-foreground">
