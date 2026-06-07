@@ -13,6 +13,7 @@ import {
   LineChart,
   BookOpen,
   CalendarClock,
+  Upload,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -384,6 +385,13 @@ const Play = () => {
             >
               <BookOpen className="h-5 w-5 text-foreground/75" />
               Opening practice
+            </Link>
+            <Link
+              to="/import"
+              className="inline-flex items-center gap-3 border border-foreground/30 bg-card px-8 py-4 rounded-md font-body text-base font-semibold text-foreground transition-transform hover:scale-[1.02] hover:border-foreground/40"
+            >
+              <Upload className="h-5 w-5 text-foreground/75" />
+              Import &amp; review game
             </Link>
           </div>
         </motion.div>

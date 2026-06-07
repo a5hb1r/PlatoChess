@@ -19,8 +19,9 @@ import {
   Gift,
   Loader2,
   Lock,
+  BookOpen,
 } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useProfile } from "@/hooks/use-profile";
 import { getPuzzleLimit } from "@/lib/tier-features";
 
@@ -142,6 +143,7 @@ function mapLichess(p: LichessPuzzle): Puzzle {
 
 const Puzzles = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { isPro, isMaster } = useProfile();
   const puzzleLimit = getPuzzleLimit(isPro, isMaster);
   const [dailyCount, setDailyCount] = useState(getDailyCount);
@@ -488,33 +490,52 @@ const Puzzles = () => {
   return (
     <div className="min-h-screen bg-background">
       <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
-        <div className="container mx-auto flex items-center gap-4 px-6 py-4">
-          <Link
-            to="/play"
-            className="flex items-center gap-2 font-body text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Link>
-          <h1 className="font-display text-xl font-semibold">
-            Chess <span className="text-gradient-brand">Puzzles</span>
-          </h1>
-          <div className="ml-auto flex items-center gap-3">
-            {streak > 0 && (
-              <div className="flex items-center gap-1 font-body text-sm font-semibold text-foreground/75">
-                <Flame className="w-4 h-4" />
-                {streak}
-              </div>
-            )}
-            {loadingPuzzles && (
-              <span className="flex items-center gap-1 font-body text-xs text-muted-foreground">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Loading…
+        <div className="container mx-auto px-6 py-0">
+          <div className="flex items-center gap-4 pt-3 pb-0">
+            <Link
+              to="/play"
+              className="flex items-center gap-2 font-body text-sm text-muted-foreground transition-colors hover:text-foreground shrink-0"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Link>
+            <h1 className="font-display text-xl font-semibold shrink-0">
+              Puzzles <span className="text-gradient-brand">&amp; Openings</span>
+            </h1>
+            <div className="ml-auto flex items-center gap-3">
+              {streak > 0 && (
+                <div className="flex items-center gap-1 font-body text-sm font-semibold text-amber-400">
+                  <Flame className="w-4 h-4" />
+                  {streak}
+                </div>
+              )}
+              {loadingPuzzles && (
+                <span className="flex items-center gap-1 font-body text-xs text-muted-foreground">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Loading…
+                </span>
+              )}
+              <span className="font-body text-xs text-muted-foreground border border-border rounded-full px-3 py-1">
+                {solved.size}/{allPuzzles.length} solved
               </span>
-            )}
-            <span className="font-body text-xs text-muted-foreground border border-border rounded-full px-3 py-1">
-              {solved.size}/{allPuzzles.length} solved
-            </span>
+            </div>
+          </div>
+          {/* Tab bar */}
+          <div className="flex gap-0 mt-3">
+            <button
+              onClick={() => {/* already on puzzles */}}
+              className="flex items-center gap-2 px-4 py-2.5 font-body text-sm font-semibold border-b-2 border-primary text-foreground transition-colors"
+            >
+              <Target className="w-4 h-4" />
+              Puzzles
+            </button>
+            <button
+              onClick={() => navigate("/openings")}
+              className="flex items-center gap-2 px-4 py-2.5 font-body text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <BookOpen className="w-4 h-4" />
+              Openings
+            </button>
           </div>
         </div>
       </nav>

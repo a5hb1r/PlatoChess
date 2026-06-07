@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Chess, Square } from "chess.js";
-import { ArrowLeft, BookOpen, ChevronLeft, ChevronRight, GraduationCap, RotateCcw } from "lucide-react";
+import { ArrowLeft, BookOpen, ChevronLeft, ChevronRight, GraduationCap, RotateCcw, Target, Lock, Crown } from "lucide-react";
 import {
   OPENING_CHAPTERS,
   OPENING_FAMILIES,
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const Openings = () => {
+  const navigate = useNavigate();
   const [family, setFamily] = useState<string>(OPENING_FAMILIES[0]);
   const [line, setLine] = useState<OpeningLine | null>(OPENING_LINES[0] ?? null);
   const [ply, setPly] = useState(0);
@@ -92,17 +93,42 @@ const Openings = () => {
   return (
     <div className="min-h-screen bg-background">
       <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
-        <div className="container mx-auto flex items-center gap-4 px-6 py-4">
-          <Link
-            to="/play"
-            className="flex items-center gap-2 font-body text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Link>
-          <h1 className="font-display text-xl font-semibold">
-            Opening <span className="text-gradient-brand">Practice</span>
-          </h1>
+        <div className="container mx-auto px-6 py-0">
+          <div className="flex items-center gap-4 pt-3">
+            <Link
+              to="/play"
+              className="flex items-center gap-2 font-body text-sm text-muted-foreground transition-colors hover:text-foreground shrink-0"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Link>
+            <h1 className="font-display text-xl font-semibold">
+              Puzzles <span className="text-gradient-brand">&amp; Openings</span>
+            </h1>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 font-body text-xs font-semibold text-amber-400">
+                <Crown className="h-3 w-3" />
+                Pro &amp; Master
+              </span>
+            </div>
+          </div>
+          {/* Tab bar */}
+          <div className="flex gap-0 mt-3">
+            <button
+              onClick={() => navigate("/puzzles")}
+              className="flex items-center gap-2 px-4 py-2.5 font-body text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Target className="w-4 h-4" />
+              Puzzles
+            </button>
+            <button
+              onClick={() => {/* already on openings */}}
+              className="flex items-center gap-2 px-4 py-2.5 font-body text-sm font-semibold border-b-2 border-primary text-foreground transition-colors"
+            >
+              <BookOpen className="w-4 h-4" />
+              Openings
+            </button>
+          </div>
         </div>
       </nav>
 
