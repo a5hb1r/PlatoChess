@@ -1,6 +1,6 @@
 {
-  "name": "PlatoChess Studio",
-  "short_name": "Platochess",
+  "name": "PlatoChess",
+  "short_name": "PlatoChess",
   "description": "Elevate your chess game with AI-powered training, tactical puzzles, opening repertoire builder, and personalized coaching.",
   "start_url": "/",
   "display": "standalone",
@@ -22,6 +22,12 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ],
   "shortcuts": [

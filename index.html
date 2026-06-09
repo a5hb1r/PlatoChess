@@ -48,9 +48,14 @@
   <meta name="msapplication-TileColor" content="#0a0a0a" />
   <meta name="msapplication-config" content="/browserconfig.xml" />
 
-  <!-- Favicon & App Icons (logo.png = brand mark from src/assets) -->
-  <link rel="icon" type="image/png" href="/logo.png" sizes="512x512" />
+  <!-- Favicon & App Icons -->
+  <!-- SVG scales perfectly to any size and is preferred by modern browsers + Google -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <!-- ICO fallback (embeds logo.png, covers legacy browsers) -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any" />
+  <!-- High-res PNG for browsers that prefer raster -->
+  <link rel="icon" type="image/png" href="/logo.png" sizes="512x512" />
+  <!-- Apple home screen icon -->
   <link rel="apple-touch-icon" href="/logo.png" />
 
   <!-- PWA Manifest -->
