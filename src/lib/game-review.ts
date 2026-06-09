@@ -1,4 +1,5 @@
 import type { Color } from "chess.js";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface ReviewedPly {
   ply: number;
@@ -75,27 +76,124 @@ export function getGameHistory(): GameHistoryEntry[] {
   }
 }
 
-export function appendToGameHistory(entry: GameHistoryEntry): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    const existing = getGameHistory();
-    // Prepend newest entry; cap at max.
-    const updated = [entry, ...existing].slice(0, GAME_HISTORY_MAX);
-    localStorage.setItem(GAME_HISTORY_STORAGE_KEY, JSON.stringify(updated));
-  } catch {
-    /* ignore storage failures */
+/**
+ * Persist a new game entry.
+ *
+ * Always writes to localStorage so the Dashboard works instantly and offline.
+ * When `userId` is supplied (user is logged in) also upserts the row to
+ * Supabase so history syncs across devices — fire-and-forget, never throws.
+ */
+export function appendToGameHistory(
+  entry: GameHistoryEntry,
+  userId?: string | null,
+): void {
+  // ── localStorage (always) ──────────────────────────────────────────────────
+  if (typeof localStorage !== "undefined") {
+    try {
+      const existing = getGameHistory();
+      // Prepend newest entry; cap at max.
+      const updated = [entry, ...existing].slice(0, GAME_HISTORY_MAX);
+      localStorage.setItem(GAME_HISTORY_STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      /* ignore storage failures */
+    }
+  }
+
+  // ── Supabase (logged-in users only) ────────────────────────────────────────
+  if (userId) {
+    supabase
+      .from("game_history")
+      .upsert(
+        {
+          id: entry.id,
+          user_id: userId,
+          opponent: entry.opponent,
+          result: entry.result,
+          result_detail: entry.resultDetail,
+          move_count: entry.moveCount,
+          accuracy_w: entry.accuracy?.w ?? null,
+          accuracy_b: entry.accuracy?.b ?? null,
+          pgn: entry.pgn ?? null,
+          created_at: new Date(entry.createdAt).toISOString(),
+        },
+        { onConflict: "user_id,id" },
+      )
+      .then(({ error }) => {
+        if (error) console.warn("[game-history] upsert failed:", error.message);
+      });
   }
 }
 
-export function updateGameHistoryAccuracy(id: string, accuracy: { w: number; b: number }): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    const existing = getGameHistory();
-    const updated = existing.map((e) => (e.id === id ? { ...e, accuracy } : e));
-    localStorage.setItem(GAME_HISTORY_STORAGE_KEY, JSON.stringify(updated));
-  } catch {
-    /* ignore */
+/**
+ * Patch the accuracy fields on an existing history entry.
+ *
+ * Always updates localStorage. When `userId` is supplied also updates the
+ * Supabase row — fire-and-forget, never throws.
+ */
+export function updateGameHistoryAccuracy(
+  id: string,
+  accuracy: { w: number; b: number },
+  userId?: string | null,
+): void {
+  // ── localStorage (always) ──────────────────────────────────────────────────
+  if (typeof localStorage !== "undefined") {
+    try {
+      const existing = getGameHistory();
+      const updated = existing.map((e) => (e.id === id ? { ...e, accuracy } : e));
+      localStorage.setItem(GAME_HISTORY_STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      /* ignore */
+    }
   }
+
+  // ── Supabase (logged-in users only) ────────────────────────────────────────
+  if (userId) {
+    supabase
+      .from("game_history")
+      .update({ accuracy_w: accuracy.w, accuracy_b: accuracy.b })
+      .eq("user_id", userId)
+      .eq("id", id)
+      .then(({ error }) => {
+        if (error)
+          console.warn("[game-history] accuracy update failed:", error.message);
+      });
+  }
+}
+
+/**
+ * Fetch the full game history for a logged-in user from Supabase.
+ * Returns entries sorted newest-first, capped at GAME_HISTORY_MAX.
+ * Falls back to an empty array on error — callers should display localStorage
+ * data while this promise is pending.
+ */
+export async function getGameHistoryForUser(
+  userId: string,
+): Promise<GameHistoryEntry[]> {
+  const { data, error } = await supabase
+    .from("game_history")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(GAME_HISTORY_MAX);
+
+  if (error || !data) {
+    console.warn("[game-history] fetch failed:", error?.message);
+    return [];
+  }
+
+  return data.map((row) => ({
+    id: row.id,
+    createdAt: new Date(row.created_at).getTime(),
+    opponent: row.opponent,
+    result: row.result as "win" | "loss" | "draw",
+    resultDetail: row.result_detail,
+    moveCount: row.move_count,
+    accuracy:
+      row.accuracy_w != null && row.accuracy_b != null
+        ? { w: Number(row.accuracy_w), b: Number(row.accuracy_b) }
+        : null,
+    pgn: row.pgn ?? undefined,
+  }));
 }
 
 export interface PersonalizedPuzzle {

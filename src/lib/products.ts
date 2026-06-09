@@ -35,7 +35,7 @@ export const PRODUCTS: Product[] = [
     id: 'pro-monthly',
     name: 'Pro',
     description: 'For the dedicated improver',
-    priceInCents: 900, // $9.00
+    priceInCents: 199, // $1.99
     period: '/month',
     features: [
       'Unlimited tactical puzzles',
@@ -57,7 +57,7 @@ export const PRODUCTS: Product[] = [
     id: 'master-monthly',
     name: 'Master',
     description: 'Train like a titled player',
-    priceInCents: 1900, // $19.00
+    priceInCents: 399, // $3.99
     period: '/month',
     features: [
       'Everything in Pro',

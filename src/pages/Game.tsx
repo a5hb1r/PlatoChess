@@ -456,8 +456,8 @@ const Game = () => {
       moveCount: game.history().length,
       accuracy: null,
       pgn: game.pgn(),
-    });
-  }, [engineLabel, game, gameOver, difficulty.label, namedBot]);
+    }, user?.id);
+  }, [engineLabel, game, gameOver, difficulty.label, namedBot, user?.id]);
 
   // Stockfish plays black
   const makeEngineMove = useCallback(async () => {
@@ -900,7 +900,7 @@ const Game = () => {
         moves: reviewedPlies,
       });
       // Persist accuracy into the game history entry created when the game ended.
-      updateGameHistoryAccuracy(gameHistoryIdRef.current, accuracy);
+      updateGameHistoryAccuracy(gameHistoryIdRef.current, accuracy, user?.id);
       if (coach !== "none") setCoachLine(coachOnMoveRating(coach, "Good", "analysis", Date.now()));
     } finally {
       setReviewingGame(false);
