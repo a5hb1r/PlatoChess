@@ -17,6 +17,7 @@ Allow: /
 # Disallow private routes
 Disallow: /api/
 Disallow: /settings
+Disallow: /dashboard
 
 # Sitemap location
-Sitemap: https://platochess.studio/sitemap.xml
+Sitemap: https://platochess.com/sitemap.xml
