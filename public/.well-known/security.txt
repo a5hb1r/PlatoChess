@@ -1,0 +1,5 @@
+Contact: mailto:security@platochess.com
+Expires: 2027-06-09T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://platochess.com/.well-known/security.txt
+Policy: https://platochess.com/privacy

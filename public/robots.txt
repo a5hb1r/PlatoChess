@@ -19,5 +19,8 @@ Disallow: /api/
 Disallow: /settings
 Disallow: /dashboard
 
+# Allow security-critical paths for scanners
+Allow: /.well-known/
+
 # Sitemap location
 Sitemap: https://platochess.com/sitemap.xml
