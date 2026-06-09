@@ -1,419 +1,316 @@
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import {
-  ArrowLeft,
-  Clock,
   Zap,
   Shuffle,
   Timer,
   Users,
-  Crown,
   Bot,
-  Puzzle,
   LineChart,
   BookOpen,
   CalendarClock,
   Upload,
+  Crown,
+  Clock,
+  Loader2,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { AppLayout } from "@/components/AppLayout";
 
-const variants = [
+// ── Static decorative board ───────────────────────────────────────────────────
+// Renders a 8×8 CSS grid as visual chrome (no chess logic needed).
+function DecorativeBoard() {
+  const START_FEN_SYMBOLS: (string | null)[][] = [
+    ["♜","♞","♝","♛","♚","♝","♞","♜"],
+    ["♟","♟","♟","♟","♟","♟","♟","♟"],
+    [null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null],
+    [null,null,null,null,null,null,null,null],
+    ["♙","♙","♙","♙","♙","♙","♙","♙"],
+    ["♖","♘","♗","♕","♔","♗","♘","♖"],
+  ];
+
+  return (
+    <div className="relative w-full max-w-[400px] aspect-square rounded-xl overflow-hidden border border-border/50 shadow-xl">
+      {START_FEN_SYMBOLS.map((row, r) =>
+        row.map((piece, c) => {
+          const light = (r + c) % 2 === 0;
+          return (
+            <div
+              key={`${r}-${c}`}
+              className="absolute flex items-center justify-center"
+              style={{
+                width: "12.5%",
+                height: "12.5%",
+                left: `${c * 12.5}%`,
+                top: `${r * 12.5}%`,
+                background: light
+                  ? "hsl(var(--ivory) / 1)"
+                  : "hsl(var(--walnut) / 0.9)",
+              }}
+            >
+              {piece && (
+                <span
+                  className="select-none"
+                  style={{
+                    fontSize: "clamp(14px, 3.5vw, 28px)",
+                    lineHeight: 1,
+                    filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.5))",
+                  }}
+                >
+                  {piece}
+                </span>
+              )}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+// ── Play option rows ──────────────────────────────────────────────────────────
+interface PlayOption {
+  icon: React.ElementType;
+  iconBg: string;
+  label: string;
+  description: string;
+  onClick: () => void;
+  highlight?: boolean;
+}
+
+// ── Time-control picker ───────────────────────────────────────────────────────
+const TIME_CATEGORIES = [
   {
-    id: "standard",
-    icon: Crown,
-    name: "Standard",
-    description: "Classic chess - all the rules you know and love.",
-    color: "text-foreground/75",
+    label: "Bullet", icon: Zap, color: "text-yellow-400",
+    times: ["1+0","2+1"],
   },
   {
-    id: "blitz",
-    icon: Zap,
-    name: "Blitz & Bullet",
-    description: "Fast time controls. Think fast, move faster.",
-    color: "text-foreground/75",
+    label: "Blitz", icon: Timer, color: "text-orange-400",
+    times: ["3+0","3+2","5+0","5+3"],
   },
   {
-    id: "increment",
-    icon: Timer,
-    name: "Increment",
-    description: "Every move earns you seconds back on the clock.",
-    color: "text-foreground/75",
-  },
-  {
-    id: "chess960",
-    icon: Shuffle,
-    name: "Chess960",
-    description: "Randomized back rank. No memorized openings - pure chess.",
-    color: "text-foreground/75",
-  },
-  {
-    id: "daily",
-    icon: CalendarClock,
-    name: "Daily Chess",
-    description: "24-hour move windows and turn reminders.",
-    color: "text-foreground/75",
+    label: "Rapid", icon: Clock, color: "text-sky-400",
+    times: ["10+0","15+10","30+0"],
   },
 ];
 
-const timeControls: Record<string, { label: string; time: string }[]> = {
-  standard: [
-    { label: "Rapid 15|10", time: "15+10" },
-    { label: "Rapid 10|0", time: "10+0" },
-    { label: "Classical 30|0", time: "30+0" },
-  ],
-  blitz: [
-    { label: "Bullet 1|0", time: "1+0" },
-    { label: "Blitz 3|0", time: "3+0" },
-    { label: "Blitz 5|0", time: "5+0" },
-  ],
-  increment: [
-    { label: "3|2", time: "3+2" },
-    { label: "5|3", time: "5+3" },
-    { label: "10|5", time: "10+5" },
-    { label: "15|10", time: "15+10" },
-  ],
-  chess960: [
-    { label: "Blitz 5|0", time: "5+0" },
-    { label: "Rapid 10|0", time: "10+0" },
-    { label: "Increment 5|3", time: "5+3" },
-  ],
-  daily: [{ label: "Daily 24h per move", time: "24h/move" }],
-};
-
-const containerVariants = {
-  hidden: {},
-  visible: { transition: { staggerChildren: 0.08 } },
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" as const } },
-};
-
-const STOCKFISH_LEVELS = [
-  { label: "Beginner", rating: "~250", level: 0 },
-  { label: "Easy", rating: "~500", level: 1 },
-  { label: "Medium", rating: "~850", level: 2 },
-  { label: "Hard", rating: "~1150", level: 3 },
-  { label: "Expert", rating: "~1500", level: 4 },
-  { label: "Master", rating: "~1850", level: 5 },
-];
-
+// ── Main component ────────────────────────────────────────────────────────────
 const Play = () => {
   const { user } = useAuth();
-  const [selectedVariant, setSelectedVariant] = useState<string | null>(null);
-  const [selectedTime, setSelectedTime] = useState<string | null>(null);
-  const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
   const [maxActiveGames, setMaxActiveGames] = useState(3);
   const [activeGameCount, setActiveGameCount] = useState(0);
-  const [loadingActiveGameGate, setLoadingActiveGameGate] = useState(false);
+  const [loadingGate, setLoadingGate] = useState(false);
   const navigate = useNavigate();
 
   const fetchActiveGameCount = async (userId: string) => {
-    const { data, error } = await supabase.rpc("get_active_game_count", {
-      p_user_id: userId,
-    });
+    const { data, error } = await supabase.rpc("get_active_game_count", { p_user_id: userId });
     if (error) return 0;
     return typeof data === "number" ? data : 0;
   };
 
   useEffect(() => {
-    if (!user) {
-      setActiveGameCount(0);
-      setMaxActiveGames(3);
-      return;
-    }
-
+    if (!user) return;
     let mounted = true;
-    setLoadingActiveGameGate(true);
+    setLoadingGate(true);
     Promise.all([
-      supabase
-        .from("profiles")
-        .select("max_active_games")
-        .eq("user_id", user.id)
-        .maybeSingle(),
+      supabase.from("profiles").select("max_active_games").eq("user_id", user.id).maybeSingle(),
       fetchActiveGameCount(user.id),
-    ])
-      .then(([profileResponse, gameCount]) => {
-        if (!mounted) return;
-        if (profileResponse.data?.max_active_games) {
-          setMaxActiveGames(profileResponse.data.max_active_games);
-        }
-        setActiveGameCount(gameCount);
-      })
-      .finally(() => {
-        if (mounted) setLoadingActiveGameGate(false);
-      });
-
-    return () => {
-      mounted = false;
-    };
+    ]).then(([prof, count]) => {
+      if (!mounted) return;
+      if (prof.data?.max_active_games) setMaxActiveGames(prof.data.max_active_games);
+      setActiveGameCount(count);
+    }).finally(() => { if (mounted) setLoadingGate(false); });
+    return () => { mounted = false; };
   }, [user]);
 
-  const handlePlay = async () => {
+  const handleOnlinePlay = async () => {
     if (user) {
-      setLoadingActiveGameGate(true);
-      const latestCount = await fetchActiveGameCount(user.id);
-      setActiveGameCount(latestCount);
-      setLoadingActiveGameGate(false);
-      if (latestCount >= maxActiveGames) {
-        toast.error(`Active game limit reached (${latestCount}/${maxActiveGames}). Finish a game before seeking another.`);
+      setLoadingGate(true);
+      const count = await fetchActiveGameCount(user.id);
+      setActiveGameCount(count);
+      setLoadingGate(false);
+      if (count >= maxActiveGames) {
+        toast.error(`Active game limit (${count}/${maxActiveGames}). Finish a game first.`);
         return;
       }
     }
-
-    if (selectedVariant === "daily") {
-      toast.success("Starting Daily mode (24h per move). Turn notifications are enabled.");
-      navigate("/game?level=2&mode=daily");
-      return;
-    }
-
-    toast.message("Online matchmaking is not live yet - opening a practice game vs Stockfish.");
+    toast.message("Matchmaking coming soon — opening a practice game.");
     navigate("/game?level=2&mode=online");
   };
 
-  const handlePlayStockfish = (level: number) => {
-    navigate(`/game?level=${level}&mode=practice`);
+  const handleTimeControl = async (time: string) => {
+    if (user) {
+      const count = await fetchActiveGameCount(user.id);
+      if (count >= maxActiveGames) {
+        toast.error(`Active game limit (${count}/${maxActiveGames}).`);
+        return;
+      }
+    }
+    navigate(`/game?level=2&mode=standard&time=${encodeURIComponent(time)}`);
   };
 
+  const OPTIONS: PlayOption[] = [
+    {
+      icon: Zap,
+      iconBg: "bg-yellow-500",
+      label: "Play Online",
+      description: "Play vs a person of similar skill",
+      onClick: handleOnlinePlay,
+      highlight: true,
+    },
+    {
+      icon: Bot,
+      iconBg: "bg-sky-600",
+      label: "Play Bots",
+      description: "Challenge a bot from Easy to Master",
+      onClick: () => navigate("/bots"),
+    },
+    {
+      icon: Users,
+      iconBg: "bg-amber-600",
+      label: "Play a Friend",
+      description: "Invite a friend to a game of chess",
+      onClick: () => { toast.message("Friend invites coming soon!"); },
+    },
+    {
+      icon: CalendarClock,
+      iconBg: "bg-green-700",
+      label: "Daily Chess",
+      description: "Up to 24h per move, no time pressure",
+      onClick: () => navigate("/game?level=2&mode=daily"),
+    },
+    {
+      icon: Shuffle,
+      iconBg: "bg-purple-600",
+      label: "Chess 960",
+      description: "Randomised starting position",
+      onClick: () => navigate("/game?level=2&mode=standard&variant=chess960"),
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Top bar */}
-      <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
-        <div className="container mx-auto flex items-center gap-4 px-6 py-4">
-          <Link
-            to="/"
-            className="flex items-center gap-2 font-body text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Link>
-          <h1 className="font-display text-xl font-semibold">
-            Play <span className="text-gradient-brand">Chess</span>
+    <AppLayout>
+      <div className="min-h-screen bg-background">
+        {/* ── Page header ─────────────────────────────────────────── */}
+        <div className="border-b border-border/40 px-6 lg:px-10 py-4">
+          <h1 className="font-display text-xl font-bold text-foreground flex items-center gap-2">
+            ♟ Play Chess
           </h1>
         </div>
-      </nav>
 
-      <div className="container mx-auto px-6 py-12 max-w-4xl">
-        {/* Step 1: Choose variant */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="mb-10"
-        >
-          <p className="font-body text-sm uppercase tracking-[0.25em] text-foreground/75 mb-2">
-            Step 1
-          </p>
-          <h2 className="font-display text-2xl md:text-3xl font-bold mb-6">
-            Choose Your Format
-          </h2>
+        {/* ── Two-column layout ────────────────────────────────────── */}
+        <div className="flex flex-col lg:flex-row gap-0 min-h-[calc(100vh-57px)]">
 
-          <motion.div
-            variants={containerVariants}
-            initial="hidden"
-            animate="visible"
-            className="grid grid-cols-1 sm:grid-cols-2 gap-4"
-          >
-            {variants.map((v) => (
-              <motion.button
-                key={v.id}
-                variants={itemVariants}
-                onClick={() => {
-                  setSelectedVariant(v.id);
-                  setSelectedTime(null);
-                }}
-                className={`group relative rounded-lg border p-6 text-left transition-all duration-200 ${
-                  selectedVariant === v.id
-                    ? "border-foreground/35 bg-secondary shadow-gold"
-                    : "border-border bg-card hover:border-foreground/20"
-                }`}
-              >
-                <div className="flex items-start gap-4">
-                  <div
-                    className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors ${
-                      selectedVariant === v.id
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-secondary text-foreground/75"
-                    }`}
-                  >
-                    <v.icon className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-display text-lg font-semibold mb-1">
-                      {v.name}
-                    </h3>
-                    <p className="font-body text-sm text-muted-foreground leading-relaxed">
-                      {v.description}
+          {/* Left — decorative board */}
+          <div className="lg:flex-1 flex items-center justify-center bg-secondary/20 p-8 lg:p-12 border-b lg:border-b-0 lg:border-r border-border/30">
+            <div className="w-full max-w-[420px]">
+              <DecorativeBoard />
+
+              {/* Time controls below the board */}
+              <div className="mt-6 space-y-3">
+                {TIME_CATEGORIES.map((cat) => (
+                  <div key={cat.label}>
+                    <p className="flex items-center gap-1.5 font-body text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                      <cat.icon className={`h-3.5 w-3.5 ${cat.color}`} />
+                      {cat.label}
                     </p>
+                    <div className="flex flex-wrap gap-2">
+                      {cat.times.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => handleTimeControl(t)}
+                          className="rounded-md border border-border bg-card px-3.5 py-1.5 font-body text-xs font-medium text-foreground hover:border-primary hover:text-primary transition-colors"
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </motion.button>
-            ))}
-          </motion.div>
-        </motion.div>
+                ))}
+              </div>
 
-        {/* Step 2: Time control */}
-        {selectedVariant && (
-          <motion.div
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-            className="mb-10"
-          >
-            <p className="font-body text-sm uppercase tracking-[0.25em] text-foreground/75 mb-2">
-              Step 2
-            </p>
-            <h2 className="font-display text-2xl md:text-3xl font-bold mb-6">
-              Pick Time Control
+              {user && (
+                <p className="mt-4 font-body text-[11px] text-muted-foreground text-center">
+                  {loadingGate ? (
+                    <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Checking games…</span>
+                  ) : (
+                    `Active games: ${activeGameCount} / ${maxActiveGames}`
+                  )}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Right — options panel */}
+          <div className="lg:w-80 xl:w-96 flex flex-col p-5 lg:p-8 gap-2">
+            <h2 className="font-display text-lg font-bold text-foreground mb-2">
+              How do you want to play?
             </h2>
 
-            <div className="flex flex-wrap gap-3">
-              {timeControls[selectedVariant]?.map((tc) => (
-                <button
-                  key={tc.time}
-                  onClick={() => setSelectedTime(tc.time)}
-                  className={`flex items-center gap-2 rounded-md border px-5 py-3 font-body text-sm font-medium transition-all duration-200 ${
-                    selectedTime === tc.time
-                      ? "border-foreground/35 bg-secondary text-foreground shadow-gold"
-                      : "border-border bg-card text-muted-foreground hover:border-foreground/20 hover:text-foreground"
-                  }`}
+            {OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                type="button"
+                onClick={opt.onClick}
+                className={`group flex items-center gap-4 rounded-xl border p-4 text-left transition-all duration-200 ${
+                  opt.highlight
+                    ? "border-primary/40 bg-primary/5 hover:bg-primary/10 hover:border-primary/60"
+                    : "border-border bg-card hover:border-foreground/25 hover:bg-secondary/50"
+                }`}
+              >
+                <span
+                  className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${opt.iconBg}`}
                 >
-                  <Clock className="h-4 w-4 text-foreground/75" />
-                  {tc.label}
-                </button>
-              ))}
-            </div>
-          </motion.div>
-        )}
+                  <opt.icon className="h-5 w-5 text-white" />
+                </span>
+                <div className="min-w-0">
+                  <p className={`font-display text-sm font-semibold ${opt.highlight ? "text-primary" : "text-foreground"}`}>
+                    {opt.label}
+                  </p>
+                  <p className="font-body text-xs text-muted-foreground leading-snug">
+                    {opt.description}
+                  </p>
+                </div>
+                <span className="ml-auto text-muted-foreground group-hover:text-foreground text-lg shrink-0">›</span>
+              </button>
+            ))}
 
-        {/* Play button */}
-        {selectedVariant && selectedTime && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.3 }}
-            className="text-center"
-          >
-            <button
-              onClick={handlePlay}
-              className="inline-flex items-center gap-3 bg-primary px-12 py-4 rounded-md font-body text-base font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
-            >
-              <Users className="h-5 w-5" />
-              Find Opponent
-            </button>
-            <p className="font-body text-xs text-muted-foreground mt-3">
-              {variants.find((v) => v.id === selectedVariant)?.name}  -  {selectedTime}
+            {/* Divider */}
+            <div className="my-2 h-px bg-border/50" />
+
+            {/* Learn / Analyze */}
+            <p className="font-body text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+              Tools
             </p>
-            {user && (
-              <p className="font-body text-xs text-muted-foreground mt-2">
-                {loadingActiveGameGate
-                  ? "Checking active game cap..."
-                  : `Active games: ${activeGameCount}/${maxActiveGames}`}
-              </p>
-            )}
-          </motion.div>
-        )}
-
-        {/* Play a Bot */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="mt-16"
-        >
-          <div className="h-px bg-border mb-12" />
-          <p className="font-body text-sm uppercase tracking-[0.25em] text-foreground/75 mb-2">
-            Practice
-          </p>
-          <h2 className="font-display text-2xl md:text-3xl font-bold mb-2">
-            Play a Bot
-          </h2>
-          <p className="font-body text-sm text-muted-foreground mb-6 max-w-lg">
-            Challenge 8 philosopher-bots from beginner (~300 ELO) to near-master (~2100 ELO).
-            Free players get 3 bots — Pro and Master unlock the rest.
-          </p>
-
-          <Link
-            to="/bots"
-            className="inline-flex items-center gap-3 bg-primary px-8 py-4 rounded-md font-body text-base font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
-          >
-            <Bot className="h-5 w-5" />
-            Browse Bots
-          </Link>
-        </motion.div>
-
-        {/* Chess Puzzles */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.25 }}
-          className="mt-12"
-        >
-          <div className="h-px bg-border mb-12" />
-          <p className="font-body text-sm uppercase tracking-[0.25em] text-foreground/75 mb-2">
-            Train
-          </p>
-          <h2 className="font-display text-2xl md:text-3xl font-bold mb-2">
-            Analysis & Openings
-          </h2>
-          <p className="font-body text-sm text-muted-foreground mb-6 max-w-xl">
-            Paste a PGN for Stockfish 18 analysis, or drill classical opening lines with quiz mode.
-          </p>
-          <div className="flex flex-wrap gap-4">
-            <Link
-              to="/analyze"
-              className="inline-flex items-center gap-3 border border-foreground/30 bg-card px-8 py-4 rounded-md font-body text-base font-semibold text-foreground transition-transform hover:scale-[1.02] hover:border-foreground/40"
-            >
-              <LineChart className="h-5 w-5 text-foreground/75" />
-              Analyze game
-            </Link>
-            <Link
-              to="/openings"
-              className="inline-flex items-center gap-3 border border-foreground/30 bg-card px-8 py-4 rounded-md font-body text-base font-semibold text-foreground transition-transform hover:scale-[1.02] hover:border-foreground/40"
-            >
-              <BookOpen className="h-5 w-5 text-foreground/75" />
-              Opening practice
-            </Link>
-            <Link
-              to="/import"
-              className="inline-flex items-center gap-3 border border-foreground/30 bg-card px-8 py-4 rounded-md font-body text-base font-semibold text-foreground transition-transform hover:scale-[1.02] hover:border-foreground/40"
-            >
-              <Upload className="h-5 w-5 text-foreground/75" />
-              Import &amp; review game
-            </Link>
+            {[
+              { to: "/analyze", icon: LineChart, label: "Analyze Game", desc: "Paste a PGN for Stockfish review" },
+              { to: "/openings", icon: BookOpen, label: "Opening Practice", desc: "Drill classical opening lines" },
+              { to: "/import", icon: Upload, label: "Import & Review", desc: "Upload a PGN file" },
+            ].map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className="group flex items-center gap-4 rounded-xl border border-border bg-card p-4 hover:border-foreground/25 hover:bg-secondary/50 transition-all"
+              >
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-secondary">
+                  <item.icon className="h-5 w-5 text-foreground/70" />
+                </span>
+                <div className="min-w-0">
+                  <p className="font-display text-sm font-semibold text-foreground">{item.label}</p>
+                  <p className="font-body text-xs text-muted-foreground">{item.desc}</p>
+                </div>
+                <span className="ml-auto text-muted-foreground group-hover:text-foreground text-lg shrink-0">›</span>
+              </Link>
+            ))}
           </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
-          className="mt-12"
-        >
-          <div className="h-px bg-border mb-12" />
-          <p className="font-body text-sm uppercase tracking-[0.25em] text-foreground/75 mb-2">
-            Improve
-          </p>
-          <h2 className="font-display text-2xl md:text-3xl font-bold mb-2">
-            Chess Puzzles
-          </h2>
-          <p className="font-body text-sm text-muted-foreground mb-6">
-            Solve tactical puzzles to sharpen your pattern recognition - forks, pins, mates, and more.
-          </p>
-          <Link
-            to="/puzzles"
-            className="inline-flex items-center gap-3 bg-primary px-8 py-4 rounded-md font-body text-base font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
-          >
-            <Puzzle className="h-5 w-5" />
-            Start Solving Puzzles
-          </Link>
-        </motion.div>
+        </div>
       </div>
-    </div>
+    </AppLayout>
   );
 };
 

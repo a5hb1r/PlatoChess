@@ -14,6 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      game_history: {
+        Row: {
+          id: string
+          user_id: string
+          opponent: string
+          result: string
+          result_detail: string
+          move_count: number
+          accuracy_w: number | null
+          accuracy_b: number | null
+          pgn: string | null
+          created_at: string
+        }
+        Insert: {
+          id: string
+          user_id: string
+          opponent?: string
+          result?: string
+          result_detail?: string
+          move_count?: number
+          accuracy_w?: number | null
+          accuracy_b?: number | null
+          pgn?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          opponent?: string
+          result?: string
+          result_detail?: string
+          move_count?: number
+          accuracy_w?: number | null
+          accuracy_b?: number | null
+          pgn?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "game_history_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       pvp_matches: {
         Row: {
           black_delta: number
