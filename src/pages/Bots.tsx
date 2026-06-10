@@ -18,8 +18,8 @@ const TIER_COLORS: Record<string, string> = {
 };
 
 const TIER_PRICES: Record<string, string> = {
-  pro: "$9/mo",
-  master: "$19/mo",
+  pro: "$1.99/mo",
+  master: "$3.99/mo",
 };
 
 /** Full-screen upgrade modal when a locked bot is tapped */

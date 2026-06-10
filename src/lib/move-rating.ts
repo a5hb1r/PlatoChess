@@ -144,7 +144,10 @@ export function rateMoveLikeChessCom(
   const isBest = !!bestMoveUci && playedUci === bestMoveUci;
   const isCheck = playedMove.san.includes("+") || playedMove.san.includes("#");
   const isCapture = playedMove.san.includes("x");
-  const isSacrifice = !isCapture && /[QRBN]/.test(playedMove.san) && cpLoss <= 24;
+  // A pre-computed sacrifice flag (from moveIsSacrifice) overrides the cheap
+  // SAN-based heuristic used when the caller has no board context.
+  const isSacrifice =
+    options?.isSacrifice ?? (!isCapture && /[QRBN]/.test(playedMove.san) && cpLoss <= 24);
 
   // Eval from the moving side's point of view (positive = good for the mover).
   const beforeForSide = side === "w" ? beforeCp : -beforeCp;
@@ -157,7 +160,13 @@ export function rateMoveLikeChessCom(
       : undefined;
 
   if ((isSacrifice || (isCheck && cpLoss <= 20)) && cpLoss <= 24) {
-    return { label: "Brilliant", color: "text-[#14b8a6] font-semibold", cpLoss, bestMove: bestMoveUci };
+    // Scale brilliancy by player level: above the threshold only the uniquely
+    // best sacrifice earns Brilliant; visible/standard ones downgrade to Best.
+    const verdict = brilliancyVerdictForLevel(options?.playerElo, options?.isOnlyGoodMove ?? isBest);
+    if (verdict === "brilliant") {
+      return { label: "Brilliant", color: "text-[#14b8a6] font-semibold", cpLoss, bestMove: bestMoveUci };
+    }
+    return { label: "Best", color: "text-foreground", cpLoss, bestMove: bestMoveUci };
   }
   // Missed win: the side was clearly winning (or had a forced mate) and let
   // most of that advantage slip. Flagged distinctly from a plain mistake.

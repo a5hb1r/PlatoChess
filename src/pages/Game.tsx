@@ -97,14 +97,52 @@ type QueuedPremove = {
   promotion?: string;
 };
 
-type GameMode = "practice" | "daily" | "online";
+type GameMode = "practice" | "daily" | "online" | "casual" | "friend";
 type BotMsg = { id: number; text: string; isBot: boolean };
 
 function parseGameMode(raw: string | null): GameMode {
   const r = (raw || "").toLowerCase();
   if (r === "daily") return "daily";
   if (r === "online") return "online";
+  if (r === "casual") return "casual";
+  if (r === "friend") return "friend";
   return "practice";
+}
+
+// ── Casual mode — any ELO, unrated ────────────────────────────────────────────
+// Maps a requested ELO to Stockfish skill/depth by interpolating between the
+// same anchor points used for the named difficulty levels.
+const CASUAL_ELO_MIN = 250;
+const CASUAL_ELO_MAX = 2300;
+const CASUAL_ANCHORS = [
+  { elo: 250, skill: 0, depth: 2 },
+  { elo: 500, skill: 2, depth: 3 },
+  { elo: 850, skill: 4, depth: 5 },
+  { elo: 1150, skill: 7, depth: 7 },
+  { elo: 1500, skill: 10, depth: 9 },
+  { elo: 1850, skill: 14, depth: 12 },
+  { elo: 2100, skill: 17, depth: 14 },
+  { elo: 2300, skill: 20, depth: 16 },
+] as const;
+
+function clampCasualElo(raw: number): number {
+  if (!Number.isFinite(raw)) return 800;
+  return Math.round(Math.max(CASUAL_ELO_MIN, Math.min(CASUAL_ELO_MAX, raw)));
+}
+
+function casualEngineParams(elo: number): { skill: number; depth: number } {
+  for (let i = 1; i < CASUAL_ANCHORS.length; i++) {
+    if (elo <= CASUAL_ANCHORS[i].elo) {
+      const lo = CASUAL_ANCHORS[i - 1];
+      const hi = CASUAL_ANCHORS[i];
+      const t = (elo - lo.elo) / (hi.elo - lo.elo);
+      return {
+        skill: Math.round(lo.skill + t * (hi.skill - lo.skill)),
+        depth: Math.round(lo.depth + t * (hi.depth - lo.depth)),
+      };
+    }
+  }
+  return { skill: 20, depth: 16 };
 }
 
 function parseCoachId(raw: string | null): CoachId {
@@ -149,8 +187,14 @@ const Game = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const difficultyParam = parseInt(searchParams.get("level") || "2");
-  const modeParam = (searchParams.get("mode") || "practice").toLowerCase();
-  const isPracticeMode = modeParam !== "online";
+  const mode = parseGameMode(searchParams.get("mode"));
+  const isDailyMode = mode === "daily";
+  const isCasualMode = mode === "casual";
+  const isFriendMode = mode === "friend";
+  /** Stockfish plays Black in every mode except local pass-and-play. */
+  const isEngineOpponent = !isFriendMode;
+  /** Live eval bar/readout — hidden online and in pass-and-play (it would spoil a human game). */
+  const showLiveEval = mode !== "online" && !isFriendMode;
 
   // Named-bot support: override skill/depth from URL params when a bot is specified
   const botId = searchParams.get("bot");
@@ -158,15 +202,16 @@ const Game = () => {
   const baseLevel = DIFFICULTY_LEVELS[Math.min(difficultyParam, DIFFICULTY_LEVELS.length - 1)];
   const skillOverride = searchParams.get("skill");
   const depthOverride = searchParams.get("depth");
-  const difficulty = namedBot
-    ? { ...baseLevel, skill: namedBot.skill, depth: namedBot.depth, label: namedBot.name, rating: namedBot.ratingLabel }
-    : skillOverride && depthOverride
-      ? { ...baseLevel, skill: parseInt(skillOverride), depth: parseInt(depthOverride) }
-      : baseLevel;
+  const casualElo = isCasualMode ? clampCasualElo(Number(searchParams.get("elo") || "800")) : null;
+  const difficulty = casualElo !== null
+    ? { label: "Casual", rating: `~${casualElo}`, ...casualEngineParams(casualElo) }
+    : namedBot
+      ? { ...baseLevel, skill: namedBot.skill, depth: namedBot.depth, label: namedBot.name, rating: namedBot.ratingLabel }
+      : skillOverride && depthOverride
+        ? { ...baseLevel, skill: parseInt(skillOverride), depth: parseInt(depthOverride) }
+        : baseLevel;
 
   const coach = parseCoachId(searchParams.get("coach"));
-  const mode = parseGameMode(searchParams.get("mode"));
-  const isDailyMode = mode === "daily";
   const [coachLine, setCoachLine] = useState<string | null>(null);
 
   // Named-bot personality dialogue
@@ -258,12 +303,12 @@ const Game = () => {
 
   const allLegalDestinations = useMemo(() => {
     const s = new Set<Square>();
-    if (gameTurn !== "w" || gameIsOver || viewFen) return s;
+    if ((isEngineOpponent && gameTurn !== "w") || gameIsOver || viewFen) return s;
     for (const m of game.moves({ verbose: true })) {
-      if (m.color === "w") s.add(m.to as Square);
+      if (m.color === gameTurn) s.add(m.to as Square);
     }
     return s;
-  }, [game, gameTurn, gameIsOver, viewFen]);
+  }, [game, gameTurn, gameIsOver, viewFen, isEngineOpponent]);
 
   const clearQueuedPremove = useCallback(() => {
     setQueuedPremove(null);
@@ -348,10 +393,18 @@ const Game = () => {
     if (isDailyMode || gameOver || gameIsOver) {
       setRunning(false);
     } else {
-      setActive(gameTurn === "w" ? "white" : "black");
+      setActive(gameTurn);
       setRunning(!viewFen);
     }
   }, [gameTurn, gameOver, gameIsOver, isDailyMode, viewFen, setActive, setRunning]);
+
+  // Pass & Play: running out of time ends the game (vs the engine the clock is
+  // cosmetic, but between two humans the flag must be decisive).
+  useEffect(() => {
+    if (!isFriendMode || gameOver || !flagged) return;
+    setGameOver(flagged === "w" ? "Black wins on time!" : "White wins on time!");
+    ChessSounds.gameOver();
+  }, [flagged, gameOver, isFriendMode]);
 
   // --- Material + captured pieces (derived from the displayed position) ---
   const material = useMemo(() => computeMaterial(displayFen), [displayFen]);
@@ -397,7 +450,7 @@ const Game = () => {
   }, [difficulty.skill]);
 
   useEffect(() => {
-    if (!isPracticeMode || !engineReady || !engineRef.current || engineError) return;
+    if (!showLiveEval || !engineReady || !engineRef.current || engineError) return;
     const fen = viewFen || gameFen;
     const side = new Chess(fen).turn();
     if (!viewFen && side === "b") return;
@@ -415,7 +468,7 @@ const Game = () => {
       }
       lastEvalUiUpdateRef.current = now;
     });
-  }, [gameFen, viewFen, engineReady, engineError, isPracticeMode]);
+  }, [gameFen, viewFen, engineReady, engineError, showLiveEval]);
 
   // Check game over
   useEffect(() => {
@@ -450,14 +503,18 @@ const Game = () => {
     appendToGameHistory({
       id: gameHistoryIdRef.current,
       createdAt: now,
-      opponent: namedBot ? namedBot.name : `Stockfish ${difficulty.label}`,
+      opponent: isFriendMode
+        ? "Pass & Play"
+        : namedBot
+          ? namedBot.name
+          : `Stockfish ${difficulty.label}`,
       result: resultOutcome,
       resultDetail: gameOver,
       moveCount: game.history().length,
       accuracy: null,
       pgn: game.pgn(),
     }, user?.id);
-  }, [engineLabel, game, gameOver, difficulty.label, namedBot, user?.id]);
+  }, [engineLabel, game, gameOver, difficulty.label, namedBot, user?.id, isFriendMode]);
 
   // Stockfish plays black
   const makeEngineMove = useCallback(async () => {
@@ -488,11 +545,11 @@ const Game = () => {
   }, [difficulty.depth, engineError, applyIncrement]);
 
   useEffect(() => {
-    if (engineReady && !engineError && game.turn() === "b" && !game.isGameOver() && !engineThinking) {
+    if (isEngineOpponent && engineReady && !engineError && game.turn() === "b" && !game.isGameOver() && !engineThinking) {
       const timer = setTimeout(makeEngineMove, 320);
       return () => clearTimeout(timer);
     }
-  }, [gameTurn, gameIsOver, engineReady, engineError, engineThinking, makeEngineMove]);
+  }, [gameTurn, gameIsOver, engineReady, engineError, engineThinking, makeEngineMove, isEngineOpponent, game]);
 
   useEffect(() => {
     if (coach === "none") return;
@@ -584,12 +641,13 @@ const Game = () => {
 
   const executeMove = useCallback(
     (from: Square, to: Square, promotion?: string) => {
+      const mover = game.turn();
       const g = new Chess(game.fen());
       const result = g.move({ from, to, promotion: (promotion || undefined) as PieceSymbol | undefined });
 
       if (result) {
         playMoveSound(result, g.isCheck());
-        applyIncrement("w");
+        applyIncrement(mover);
         setMoveHistory((prev) => [...prev, { san: result.san }]);
         setGame(g);
         setLastMove({ from, to });
@@ -607,7 +665,7 @@ const Game = () => {
   );
 
   useEffect(() => {
-    if (!queuedPremove || game.turn() !== "w" || engineThinking || gameOver || !premoveEnabled) return;
+    if (!queuedPremove || !isEngineOpponent || game.turn() !== "w" || engineThinking || gameOver || !premoveEnabled) return;
 
     const queuedMove = queuedPremove;
     clearQueuedPremove();
@@ -625,6 +683,7 @@ const Game = () => {
     gameOver,
     premoveEnabled,
     queuedPremove,
+    isEngineOpponent,
   ]);
 
   useEffect(() => {
@@ -634,13 +693,18 @@ const Game = () => {
     }
   }, [gameTurn, gameOver, isDailyMode, game]);
 
+  // Which color the human at the board may pick up right now. Vs the engine the
+  // human is always White; in pass-and-play both players share the device, so
+  // it is whoever's turn it is.
+  const movableColor: Color = isFriendMode ? game.turn() : "w";
+
   const handleSquareClick = (square: Square) => {
-    if (game.turn() !== "w" || engineThinking || gameOver || viewFen) return;
-    if (dragging) return;
+    if (gameOver || viewFen || dragging) return;
 
     const piece = game.get(square);
 
-    if (game.turn() !== "w") {
+    // Engine is thinking (Black's turn): clicks queue a premove instead.
+    if (isEngineOpponent && game.turn() !== "w") {
       if (!premoveEnabled) return;
 
       if (selectedSquare) {
@@ -681,7 +745,7 @@ const Game = () => {
       }
     }
 
-    if (piece && piece.color === "w") {
+    if (piece && piece.color === movableColor) {
       setSelectedSquare(square);
       const moves = game.moves({ square, verbose: true });
       setValidMoves(moves.map((m) => m.to as Square));
@@ -699,9 +763,9 @@ const Game = () => {
 
   // --- Drag and Drop ---
   const handleDragStart = (square: Square, e: React.MouseEvent | React.TouchEvent) => {
-    if (game.turn() !== "w" || engineThinking || gameOver || viewFen) return;
+    if ((isEngineOpponent && game.turn() !== "w") || engineThinking || gameOver || viewFen) return;
     const piece = game.get(square);
-    if (!piece || piece.color !== "w") return;
+    if (!piece || piece.color !== movableColor) return;
 
     e.preventDefault();
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
@@ -946,19 +1010,23 @@ const Game = () => {
     : engineThinking
       ? "Stockfish is thinking…"
       : game.turn() === "w"
-        ? "Your turn (White)"
+        ? isFriendMode ? "White to move" : "Your turn (White)"
         : "Black to move";
 
+  // Unrated modes (casual, pass-and-play) never show an ELO swing.
+  const isUnratedMode = isCasualMode || isFriendMode;
   const eloPulse = useMemo(
-    () => (gameOver ? eloPulseForResult(gameOver, difficulty.skill) : 0),
-    [difficulty.skill, gameOver]
+    () => (gameOver && !isUnratedMode ? eloPulseForResult(gameOver, difficulty.skill) : 0),
+    [difficulty.skill, gameOver, isUnratedMode]
   );
   const resultSummary = useMemo(
     () =>
       gameOver
-        ? `${summarizeResultLabel(gameOver)} - ${eloPulse > 0 ? `+${eloPulse}` : `${eloPulse}`} Elo`
+        ? isUnratedMode
+          ? `${summarizeResultLabel(gameOver)} - Unrated`
+          : `${summarizeResultLabel(gameOver)} - ${eloPulse > 0 ? `+${eloPulse}` : `${eloPulse}`} Elo`
         : null,
-    [eloPulse, gameOver]
+    [eloPulse, gameOver, isUnratedMode]
   );
   const gameOutcome = useMemo(() => {
     if (!gameOver) return "Game complete";
@@ -1046,7 +1114,7 @@ const Game = () => {
     !isBotUnlocked(namedBot, isPro, isMaster)
   ) {
     const tierLabel = namedBot.tier === "master" ? "Master" : "Pro";
-    const tierPrice = namedBot.tier === "master" ? "$19/mo" : "$9/mo";
+    const tierPrice = namedBot.tier === "master" ? "$3.99/mo" : "$1.99/mo";
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
@@ -1110,11 +1178,21 @@ const Game = () => {
             Back
           </Link>
           <h1 className="font-display text-lg font-semibold text-gray-100 sm:text-xl">
-            {isDailyMode ? "Daily" : "Practice"}{" "}
-            <span className="text-primary">vs Stockfish</span>
+            {isFriendMode ? (
+              <>Pass &amp; Play <span className="text-primary">vs a Friend</span></>
+            ) : (
+              <>
+                {isDailyMode ? "Daily" : isCasualMode ? "Casual" : "Practice"}{" "}
+                <span className="text-primary">vs Stockfish</span>
+              </>
+            )}
           </h1>
           <span className="ml-auto rounded-full border border-border px-3 py-1 font-body text-xs text-muted-foreground">
-            {difficulty.label} ({difficulty.rating})
+            {isFriendMode
+              ? "Local · Unrated"
+              : isCasualMode
+                ? `${difficulty.rating} · Unrated`
+                : `${difficulty.label} (${difficulty.rating})`}
           </span>
         </div>
       </nav>
@@ -1124,24 +1202,24 @@ const Game = () => {
           {/* ===== Board area (≈65%) ===== */}
           <div className="order-1 w-full lg:flex-[0_0_64%] lg:max-w-[64%]">
             <div className="mx-auto flex max-w-[620px] flex-col gap-2">
-              {/* Opponent banner (Black / Stockfish) */}
+              {/* Opponent banner (Black — Stockfish, or the friend in pass-and-play) */}
               <PlayerBanner
-                name="Stockfish"
-                rating={difficulty.rating}
-                subtitle={`${engineLabel} · ${difficulty.label}`}
-                avatar={<Bot className="h-5 w-5" />}
+                name={isFriendMode ? "Black" : "Stockfish"}
+                rating={isFriendMode ? undefined : difficulty.rating}
+                subtitle={isFriendMode ? "Pass & Play" : `${engineLabel} · ${difficulty.label}`}
+                avatar={isFriendMode ? <User className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
                 color="b"
                 captured={material.capturedByBlack}
                 advantage={blackAdvantage}
                 isActive={gameTurn === "b" && !gameOver}
-                isThinking={engineThinking}
+                isThinking={isEngineOpponent && engineThinking}
                 clockMs={blackMs}
                 flagged={flagged === "b"}
               />
 
               {/* Eval bar + board */}
               <div className="flex items-stretch gap-2">
-                <EvalBar cp={eval_} mate={evalMate} />
+                {showLiveEval && <EvalBar cp={eval_} mate={evalMate} />}
 
                 <div className="relative flex-1 overflow-hidden rounded-xl border border-border shadow-elevated ring-1 ring-white/5">
                   <div ref={boardRef} className="grid aspect-square w-full grid-cols-8 grid-rows-8">
@@ -1162,7 +1240,7 @@ const Game = () => {
                         !selectedSquare &&
                         !dragging &&
                         !foresightOn &&
-                        game.turn() === "w" &&
+                        (isFriendMode || game.turn() === "w") &&
                         !gameOver &&
                         !viewFen &&
                         allLegalDestinations.has(square);
@@ -1178,7 +1256,7 @@ const Game = () => {
                           className={`relative flex select-none items-center justify-center transition-[filter] ${
                             isDark ? "bg-chess-dark hover:brightness-110" : "bg-chess-light hover:brightness-105"
                           } ${
-                            piece && game.turn() === "w" && piece.color === "w" && !gameOver && !viewFen
+                            piece && piece.color === movableColor && (isFriendMode || game.turn() === "w") && !gameOver && !viewFen
                               ? "cursor-grab"
                               : "cursor-pointer"
                           }`}
@@ -1285,7 +1363,11 @@ const Game = () => {
                               onClick={() => handlePromotion(p)}
                               className="flex h-14 w-14 items-center justify-center rounded-md border border-border bg-secondary transition-colors hover:bg-foreground/10"
                             >
-                              <PieceImage color="w" type={p} className="h-10 w-10" />
+                              <PieceImage
+                                color={(promotionSquare && game.get(promotionSquare.from)?.color) || "w"}
+                                type={p}
+                                className="h-10 w-10"
+                              />
                             </button>
                           ))}
                         </div>
@@ -1360,16 +1442,27 @@ const Game = () => {
                               <>
                                 <div className="h-8 w-px bg-border" />
                                 <div className="text-center">
-                                  <p
-                                    className={`font-display text-lg font-bold ${
-                                      eloPulse > 0 ? "text-emerald-400" : eloPulse < 0 ? "text-rose-400" : "text-foreground"
-                                    }`}
-                                  >
-                                    {eloPulse > 0 ? `+${eloPulse}` : eloPulse}
-                                  </p>
-                                  <p className="font-body text-[10px] uppercase tracking-wider text-muted-foreground">
-                                    ELO
-                                  </p>
+                                  {isUnratedMode ? (
+                                    <>
+                                      <p className="font-display text-lg font-bold text-foreground">—</p>
+                                      <p className="font-body text-[10px] uppercase tracking-wider text-muted-foreground">
+                                        Unrated
+                                      </p>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <p
+                                        className={`font-display text-lg font-bold ${
+                                          eloPulse > 0 ? "text-emerald-400" : eloPulse < 0 ? "text-rose-400" : "text-foreground"
+                                        }`}
+                                      >
+                                        {eloPulse > 0 ? `+${eloPulse}` : eloPulse}
+                                      </p>
+                                      <p className="font-body text-[10px] uppercase tracking-wider text-muted-foreground">
+                                        ELO
+                                      </p>
+                                    </>
+                                  )}
                                 </div>
                               </>
                             )}
@@ -1433,9 +1526,9 @@ const Game = () => {
 
               {/* Player banner (White / You) */}
               <PlayerBanner
-                name="You"
-                rating={1500}
-                subtitle="White"
+                name={isFriendMode ? "White" : "You"}
+                rating={isUnratedMode ? undefined : playerElo}
+                subtitle={isFriendMode ? "Pass & Play" : "White"}
                 avatar={<User className="h-5 w-5" />}
                 color="w"
                 captured={material.capturedByWhite}
@@ -1511,15 +1604,17 @@ const Game = () => {
           <div className="order-2 w-full space-y-3 lg:flex-1">
             {/* Board controls + live analysis row */}
             <div className="rounded-xl border border-border bg-card p-4 shadow-soft">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-                  <span className="font-body text-xs font-semibold text-foreground/80 uppercase tracking-wider">Live Analysis</span>
+              {showLiveEval && (
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 animate-pulse rounded-full bg-primary" />
+                    <span className="font-body text-xs font-semibold text-foreground/80 uppercase tracking-wider">Live Analysis</span>
+                  </div>
+                  <span className="font-mono text-xs text-foreground font-semibold">
+                    {evalText} <span className="text-muted-foreground font-normal">· d{evalDepth}</span>
+                  </span>
                 </div>
-                <span className="font-mono text-xs text-foreground font-semibold">
-                  {evalText} <span className="text-muted-foreground font-normal">· d{evalDepth}</span>
-                </span>
-              </div>
+              )}
 
               <div className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/50 px-3 py-2 mb-2">
                 <div className="flex items-center gap-2">

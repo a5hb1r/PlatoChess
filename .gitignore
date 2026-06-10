@@ -27,3 +27,6 @@ public/stockfish/*.wasm
 
 # Playwright
 test-results/
+
+# Local Claude Code preview config
+.claude/

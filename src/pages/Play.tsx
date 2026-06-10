@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Zap,
   Shuffle,
@@ -9,15 +9,15 @@ import {
   BookOpen,
   CalendarClock,
   Upload,
-  Crown,
   Clock,
-  Loader2,
+  Gauge,
+  Globe,
+  X,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { motion, AnimatePresence } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
+import { Slider } from "@/components/ui/slider";
 
 // ── Static decorative board ───────────────────────────────────────────────────
 // Renders a 8×8 CSS grid as visual chrome (no chess logic needed).
@@ -98,83 +98,149 @@ const TIME_CATEGORIES = [
   },
 ];
 
+// ── Casual mode ELO picker ────────────────────────────────────────────────────
+const CASUAL_ELO_MIN = 250;
+const CASUAL_ELO_MAX = 2300;
+const CASUAL_PRESETS = [400, 800, 1200, 1600, 2000, 2300];
+
+function CasualEloModal({ onClose }: { onClose: () => void }) {
+  const navigate = useNavigate();
+  const [elo, setElo] = useState(800);
+
+  const strengthLabel =
+    elo < 500 ? "Beginner"
+    : elo < 850 ? "Casual"
+    : elo < 1150 ? "Club player"
+    : elo < 1500 ? "Tournament player"
+    : elo < 1850 ? "Expert"
+    : elo < 2100 ? "Master"
+    : "Grandmaster";
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 backdrop-blur-sm px-6"
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.93, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.93, y: 20 }}
+          transition={{ duration: 0.25 }}
+          className="relative bg-card border border-border rounded-2xl p-7 max-w-md w-full shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+
+          <div className="flex items-center gap-3 mb-1">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-teal-600">
+              <Gauge className="h-5 w-5 text-white" />
+            </span>
+            <div>
+              <h2 className="font-display text-xl font-bold">Casual Mode</h2>
+              <p className="font-body text-xs text-muted-foreground">
+                Play any strength — your rating never changes.
+              </p>
+            </div>
+          </div>
+
+          {/* Big ELO readout */}
+          <div className="text-center my-6">
+            <p className="font-display text-5xl font-bold text-foreground tabular-nums">
+              {elo}
+            </p>
+            <p className="font-body text-xs uppercase tracking-[0.25em] text-muted-foreground mt-1">
+              {strengthLabel}
+            </p>
+          </div>
+
+          {/* Slider */}
+          <Slider
+            value={[elo]}
+            min={CASUAL_ELO_MIN}
+            max={CASUAL_ELO_MAX}
+            step={50}
+            onValueChange={(v) => setElo(v[0])}
+            className="mb-5"
+            aria-label="Opponent ELO"
+          />
+
+          {/* Preset chips */}
+          <div className="flex flex-wrap justify-center gap-2 mb-6">
+            {CASUAL_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setElo(preset)}
+                className={`rounded-md border px-3 py-1.5 font-mono text-xs font-medium transition-colors ${
+                  elo === preset
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-card text-foreground hover:border-foreground/30"
+                }`}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => navigate(`/game?mode=casual&elo=${elo}`)}
+            className="w-full bg-primary py-3 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02]"
+          >
+            Start Casual Game
+          </button>
+          <p className="mt-3 text-center font-body text-[11px] text-muted-foreground">
+            Unrated — win or lose, your ELO stays put.
+          </p>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 const Play = () => {
-  const { user } = useAuth();
-  const [maxActiveGames, setMaxActiveGames] = useState(3);
-  const [activeGameCount, setActiveGameCount] = useState(0);
-  const [loadingGate, setLoadingGate] = useState(false);
   const navigate = useNavigate();
+  const [casualOpen, setCasualOpen] = useState(false);
 
-  const fetchActiveGameCount = async (userId: string) => {
-    const { data, error } = await supabase.rpc("get_active_game_count", { p_user_id: userId });
-    if (error) return 0;
-    return typeof data === "number" ? data : 0;
-  };
-
-  useEffect(() => {
-    if (!user) return;
-    let mounted = true;
-    setLoadingGate(true);
-    Promise.all([
-      supabase.from("profiles").select("max_active_games").eq("user_id", user.id).maybeSingle(),
-      fetchActiveGameCount(user.id),
-    ]).then(([prof, count]) => {
-      if (!mounted) return;
-      if (prof.data?.max_active_games) setMaxActiveGames(prof.data.max_active_games);
-      setActiveGameCount(count);
-    }).finally(() => { if (mounted) setLoadingGate(false); });
-    return () => { mounted = false; };
-  }, [user]);
-
-  const handleOnlinePlay = async () => {
-    if (user) {
-      setLoadingGate(true);
-      const count = await fetchActiveGameCount(user.id);
-      setActiveGameCount(count);
-      setLoadingGate(false);
-      if (count >= maxActiveGames) {
-        toast.error(`Active game limit (${count}/${maxActiveGames}). Finish a game first.`);
-        return;
-      }
-    }
-    toast.message("Matchmaking coming soon — opening a practice game.");
-    navigate("/game?level=2&mode=online");
-  };
-
-  const handleTimeControl = async (time: string) => {
-    if (user) {
-      const count = await fetchActiveGameCount(user.id);
-      if (count >= maxActiveGames) {
-        toast.error(`Active game limit (${count}/${maxActiveGames}).`);
-        return;
-      }
-    }
-    navigate(`/game?level=2&mode=standard&time=${encodeURIComponent(time)}`);
+  const handleTimeControl = (time: string) => {
+    const [minutes, increment] = time.split("+").map(Number);
+    navigate(`/game?level=2&mode=practice&min=${minutes || 10}&inc=${increment || 0}`);
   };
 
   const OPTIONS: PlayOption[] = [
     {
-      icon: Zap,
-      iconBg: "bg-yellow-500",
-      label: "Play Online",
-      description: "Play vs a person of similar skill",
-      onClick: handleOnlinePlay,
-      highlight: true,
-    },
-    {
       icon: Bot,
       iconBg: "bg-sky-600",
       label: "Play Bots",
-      description: "Challenge a bot from Easy to Master",
+      description: "Challenge a philosopher-bot, Easy to Master",
       onClick: () => navigate("/bots"),
+      highlight: true,
+    },
+    {
+      icon: Gauge,
+      iconBg: "bg-teal-600",
+      label: "Casual Mode",
+      description: "Pick any ELO strength — unrated, no ELO at stake",
+      onClick: () => setCasualOpen(true),
     },
     {
       icon: Users,
       iconBg: "bg-amber-600",
-      label: "Play a Friend",
-      description: "Invite a friend to a game of chess",
-      onClick: () => { toast.message("Friend invites coming soon!"); },
+      label: "Pass & Play",
+      description: "Play a friend on this device",
+      onClick: () => navigate("/game?mode=friend&min=10&inc=0"),
     },
     {
       icon: CalendarClock,
@@ -183,18 +249,19 @@ const Play = () => {
       description: "Up to 24h per move, no time pressure",
       onClick: () => navigate("/game?level=2&mode=daily"),
     },
-    {
-      icon: Shuffle,
-      iconBg: "bg-purple-600",
-      label: "Chess 960",
-      description: "Randomised starting position",
-      onClick: () => navigate("/game?level=2&mode=standard&variant=chess960"),
-    },
+  ];
+
+  const COMING_SOON = [
+    { icon: Globe, label: "Play Online", desc: "Matchmaking vs players worldwide" },
+    { icon: Shuffle, label: "Chess 960", desc: "Randomised starting position" },
   ];
 
   return (
     <AppLayout>
       <div className="min-h-screen bg-background">
+        {/* Casual ELO picker modal */}
+        {casualOpen && <CasualEloModal onClose={() => setCasualOpen(false)} />}
+
         {/* ── Page header ─────────────────────────────────────────── */}
         <div className="border-b border-border/40 px-6 lg:px-10 py-4">
           <h1 className="font-display text-xl font-bold text-foreground flex items-center gap-2">
@@ -233,16 +300,6 @@ const Play = () => {
                   </div>
                 ))}
               </div>
-
-              {user && (
-                <p className="mt-4 font-body text-[11px] text-muted-foreground text-center">
-                  {loadingGate ? (
-                    <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Checking games…</span>
-                  ) : (
-                    `Active games: ${activeGameCount} / ${maxActiveGames}`
-                  )}
-                </p>
-              )}
             </div>
           </div>
 
@@ -306,6 +363,30 @@ const Play = () => {
                 </div>
                 <span className="ml-auto text-muted-foreground group-hover:text-foreground text-lg shrink-0">›</span>
               </Link>
+            ))}
+
+            {/* Coming soon */}
+            <div className="my-2 h-px bg-border/50" />
+            <p className="font-body text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+              Coming soon
+            </p>
+            {COMING_SOON.map((item) => (
+              <div
+                key={item.label}
+                aria-disabled="true"
+                className="flex items-center gap-4 rounded-xl border border-border/40 bg-card/50 p-4 opacity-60 select-none"
+              >
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-secondary">
+                  <item.icon className="h-5 w-5 text-foreground/50" />
+                </span>
+                <div className="min-w-0">
+                  <p className="font-display text-sm font-semibold text-foreground/70">{item.label}</p>
+                  <p className="font-body text-xs text-muted-foreground">{item.desc}</p>
+                </div>
+                <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-0.5 font-body text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Soon
+                </span>
+              </div>
             ))}
           </div>
         </div>

@@ -635,7 +635,7 @@ export default function AnalyzeGame() {
               See plans
             </Link>
             <p className="font-body text-xs text-muted-foreground mt-4">
-              Starts at $9 / month. Cancel anytime.
+              Starts at $1.99 / month. Cancel anytime.
             </p>
           </div>
         </div>

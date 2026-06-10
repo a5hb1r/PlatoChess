@@ -27,7 +27,7 @@ export const TIER_FEATURES = {
   },
   pro: {
     label: "Pro",
-    price: "$9/mo",
+    price: "$1.99/mo",
     puzzlesPerDay: Infinity,
     analysis: true,
     moveRatings: true,
@@ -42,7 +42,7 @@ export const TIER_FEATURES = {
   },
   master: {
     label: "Master",
-    price: "$19/mo",
+    price: "$3.99/mo",
     puzzlesPerDay: Infinity,
     analysis: true,
     moveRatings: true,

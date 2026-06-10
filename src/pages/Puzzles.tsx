@@ -471,7 +471,7 @@ const Puzzles = () => {
             to="/pricing"
             className="bg-primary px-8 py-3 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02]"
           >
-            Upgrade to Pro — $9/mo
+            Upgrade to Pro — $1.99/mo
           </Link>
           <Link
             to="/play"
