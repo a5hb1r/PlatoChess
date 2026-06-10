@@ -8,6 +8,7 @@ export interface UserProfile {
   display_name: string | null;
   username: string | null;
   avatar_url: string | null;
+  country: string | null;
   rating: number;
   games_played: number;
   puzzles_solved: number;
@@ -54,7 +55,7 @@ export function useProfile(): UseProfileResult {
     const { data } = await supabase
       .from("profiles")
       .select(
-        "user_id, display_name, username, avatar_url, rating, games_played, puzzles_solved, subscription_status, subscription_plan, subscription_current_period_end, subscription_cancel_at_period_end, stripe_customer_id, max_active_games, premove_enabled"
+        "user_id, display_name, username, avatar_url, country, rating, games_played, puzzles_solved, subscription_status, subscription_plan, subscription_current_period_end, subscription_cancel_at_period_end, stripe_customer_id, max_active_games, premove_enabled"
       )
       .eq("user_id", user.id)
       .single();

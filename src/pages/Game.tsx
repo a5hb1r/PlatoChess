@@ -79,6 +79,7 @@ import {
 } from "@/lib/philosopher-voice";
 import { PhilosopherAvatar } from "@/components/chess/PhilosopherAvatar";
 import { supabase } from "@/integrations/supabase/client";
+import { countryFlag } from "@/lib/countries";
 import { toast } from "sonner";
 
 const DIFFICULTY_LEVELS = [
@@ -193,7 +194,7 @@ function eloPulseForResult(result: string, skillLevel: number): number {
 
 const Game = () => {
   const { user } = useAuth();
-  const { isPro, isMaster, loading: profileLoading } = useProfile();
+  const { profile, isPro, isMaster, loading: profileLoading } = useProfile();
   const { showValidMoves } = useTheme();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -1245,17 +1246,25 @@ const Game = () => {
         </div>
       </nav>
 
-      <div className="container mx-auto max-w-[1400px] px-4 py-6">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          {/* ===== Board area (≈65%) ===== */}
-          <div className="order-1 w-full lg:flex-[0_0_64%] lg:max-w-[64%]">
-            <div className="mx-auto flex max-w-[620px] flex-col gap-2">
+      <div className="container mx-auto max-w-[1500px] px-3 py-4 lg:py-5">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-center">
+          {/* ===== Board area — sized to fill the viewport height like chess.com ===== */}
+          <div className="order-1 w-full lg:flex-[0_0_auto] lg:w-auto">
+            <div className="mx-auto flex w-full max-w-[min(calc(100vh_-_225px),860px)] flex-col gap-1.5 lg:w-[min(calc(100vh_-_225px),860px)]">
               {/* Opponent banner (Black — Stockfish, or the friend in pass-and-play) */}
               <PlayerBanner
-                name={isFriendMode ? "Black" : "Stockfish"}
+                name={isFriendMode ? "Black" : namedBot ? namedBot.name : "Stockfish"}
                 rating={isFriendMode ? undefined : difficulty.rating}
                 subtitle={isFriendMode ? "Pass & Play" : `${engineLabel} · ${difficulty.label}`}
-                avatar={isFriendMode ? <User className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
+                avatar={
+                  isFriendMode ? (
+                    <User className="h-5 w-5" />
+                  ) : namedBot ? (
+                    <PhilosopherAvatar botId={namedBot.id} size={36} />
+                  ) : (
+                    <Bot className="h-5 w-5" />
+                  )
+                }
                 color="b"
                 captured={material.capturedByBlack}
                 advantage={blackAdvantage}
@@ -1309,14 +1318,14 @@ const Game = () => {
                               : "cursor-pointer"
                           }`}
                         >
-                          {/* Last move highlight (warm yellow) */}
+                          {/* Last move highlight (chess.com yellow) */}
                           {isLastMoveSquare && !viewFen && (
-                            <div className="absolute inset-0" style={{ backgroundColor: "rgba(245,200,68,0.30)" }} />
+                            <div className="absolute inset-0" style={{ backgroundColor: "rgba(255,255,51,0.45)" }} />
                           )}
 
                           {/* Selected highlight */}
                           {isSelected && (
-                            <div className="absolute inset-0 z-10" style={{ backgroundColor: "rgba(245,200,68,0.45)" }} />
+                            <div className="absolute inset-0 z-10" style={{ backgroundColor: "rgba(255,255,51,0.58)" }} />
                           )}
 
                           {/* Drag target highlight */}
@@ -1333,8 +1342,8 @@ const Game = () => {
                           {/* Coords */}
                           {col === 0 && (
                             <span
-                              className={`absolute left-1 top-0.5 z-10 text-[9px] font-bold ${
-                                isDark ? "text-chess-light/80" : "text-chess-dark/80"
+                              className={`absolute left-[3px] top-[2px] z-10 text-[10px] font-bold leading-none ${
+                                isDark ? "text-chess-light/90" : "text-chess-dark/90"
                               }`}
                             >
                               {boardFlipped ? fr + 1 : 8 - fr}
@@ -1342,8 +1351,8 @@ const Game = () => {
                           )}
                           {row === 7 && (
                             <span
-                              className={`absolute bottom-0 right-1 z-10 text-[9px] font-bold ${
-                                isDark ? "text-chess-light/80" : "text-chess-dark/80"
+                              className={`absolute bottom-[2px] right-[3px] z-10 text-[10px] font-bold leading-none ${
+                                isDark ? "text-chess-light/90" : "text-chess-dark/90"
                               }`}
                             >
                               {String.fromCharCode(97 + fc)}
@@ -1574,10 +1583,26 @@ const Game = () => {
 
               {/* Player banner (White / You) */}
               <PlayerBanner
-                name={isFriendMode ? "White" : "You"}
+                name={
+                  isFriendMode
+                    ? "White"
+                    : profile?.display_name || profile?.username || "You"
+                }
                 rating={isUnratedMode ? undefined : playerElo}
                 subtitle={isFriendMode ? "Pass & Play" : "White"}
-                avatar={<User className="h-5 w-5" />}
+                flag={isFriendMode ? undefined : countryFlag(profile?.country) || undefined}
+                avatar={
+                  !isFriendMode && profile?.avatar_url ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      draggable={false}
+                    />
+                  ) : (
+                    <User className="h-5 w-5" />
+                  )
+                }
                 color="w"
                 captured={material.capturedByWhite}
                 advantage={whiteAdvantage}
@@ -1648,8 +1673,8 @@ const Game = () => {
             </div>
           </div>
 
-          {/* ===== Unified sidebar (≈35%) ===== */}
-          <div className="order-2 w-full space-y-3 lg:flex-1">
+          {/* ===== Unified sidebar ===== */}
+          <div className="order-2 w-full space-y-3 lg:flex-1 lg:min-w-[320px] lg:max-w-[430px]">
             {/* Board controls + live analysis row */}
             <div className="rounded-xl border border-border bg-card p-4 shadow-soft">
               {showLiveEval && (

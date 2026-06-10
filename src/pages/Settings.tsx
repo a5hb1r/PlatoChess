@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -12,6 +12,7 @@ import {
   Shield,
   Trophy,
   Palette,
+  Upload,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { BoardThemeId } from "@/lib/chess-themes";
+import { COUNTRIES, countryFlag, countryName } from "@/lib/countries";
 
 const PREMOVE_STORAGE_KEY = "plato:premove-enabled";
 const PREMOVE_QUEUE_STORAGE_KEY = "plato:queued-premove";
@@ -31,6 +33,7 @@ const PREMOVE_QUEUE_STORAGE_KEY = "plato:queued-premove";
 interface Profile {
   avatar_url: string | null;
   display_name: string | null;
+  country: string | null;
   max_active_games: number;
   premove_enabled: boolean;
   rating: number;
@@ -63,6 +66,48 @@ const Settings = () => {
   const [usernameValue, setUsernameValue] = useState("");
   const [avatarValue, setAvatarValue] = useState("");
   const [maxGamesValue, setMaxGamesValue] = useState(3);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarFileRef = useRef<HTMLInputElement>(null);
+
+  const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+
+  const handleAvatarFile = async (file: File | undefined) => {
+    if (!file || !user) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image file.");
+      return;
+    }
+    if (file.size > MAX_AVATAR_BYTES) {
+      toast.error("Image must be under 2 MB.");
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const ext = file.name.split(".").pop()?.toLowerCase() || "png";
+      const path = `${user.id}/avatar-${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(path, file, { upsert: true, contentType: file.type });
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+      await updateProfile({ avatar_url: data.publicUrl }, "Profile picture updated!");
+      setAvatarValue(data.publicUrl);
+    } catch {
+      toast.error("Upload failed. Please try again.");
+    } finally {
+      setUploadingAvatar(false);
+      if (avatarFileRef.current) avatarFileRef.current.value = "";
+    }
+  };
+
+  const saveCountry = async (code: string) => {
+    await updateProfile(
+      { country: code || null },
+      code ? `Country set to ${countryName(code)} ${countryFlag(code)}` : "Country cleared."
+    );
+  };
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -74,7 +119,7 @@ const Settings = () => {
 
     supabase
       .from("profiles")
-      .select("avatar_url, display_name, max_active_games, premove_enabled, rating, username, subscription_status, subscription_plan")
+      .select("avatar_url, display_name, country, max_active_games, premove_enabled, rating, username, subscription_status, subscription_plan")
       .eq("user_id", user.id)
       .single()
       .then(({ data, error }) => {
@@ -242,46 +287,70 @@ const Settings = () => {
             </h2>
             <div className="rounded-lg border border-border bg-card p-6 space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                <Avatar className="h-16 w-16 border border-border">
+                <Avatar className="h-20 w-20 border-2 border-border">
                   <AvatarImage src={profile.avatar_url || undefined} />
-                  <AvatarFallback className="font-display text-lg bg-secondary">{initials}</AvatarFallback>
+                  <AvatarFallback className="font-display text-xl bg-secondary">{initials}</AvatarFallback>
                 </Avatar>
                 <div className="space-y-2 w-full">
                   <p className="font-body text-sm text-muted-foreground">Profile Picture</p>
-                  {editingAvatar ? (
-                    <div className="flex items-center gap-2">
-                      <Input
-                        value={avatarValue}
-                        onChange={(event) => setAvatarValue(event.target.value)}
-                        className="h-9 bg-secondary border-border font-body"
-                        placeholder="https://..."
-                      />
-                      <button
-                        onClick={saveAvatar}
-                        disabled={saving}
-                        className="p-1.5 rounded-md text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
-                      >
-                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingAvatar(false);
-                          setAvatarValue(profile.avatar_url || "");
-                        }}
-                        className="p-1.5 rounded-md text-muted-foreground hover:bg-secondary transition-colors"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={avatarFileRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      onChange={(e) => handleAvatarFile(e.target.files?.[0])}
+                    />
                     <button
-                      onClick={() => setEditingAvatar(true)}
-                      className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-body text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                      onClick={() => avatarFileRef.current?.click()}
+                      disabled={uploadingAvatar}
+                      className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-body font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100"
                     >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Update picture URL
+                      {uploadingAvatar ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="h-3.5 w-3.5" />
+                      )}
+                      {uploadingAvatar ? "Uploading…" : "Upload photo"}
                     </button>
-                  )}
+                    {editingAvatar ? (
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <Input
+                          value={avatarValue}
+                          onChange={(event) => setAvatarValue(event.target.value)}
+                          className="h-9 bg-secondary border-border font-body"
+                          placeholder="https://..."
+                        />
+                        <button
+                          onClick={saveAvatar}
+                          disabled={saving}
+                          className="p-1.5 rounded-md text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                        >
+                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingAvatar(false);
+                            setAvatarValue(profile.avatar_url || "");
+                          }}
+                          className="p-1.5 rounded-md text-muted-foreground hover:bg-secondary transition-colors"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setEditingAvatar(true)}
+                        className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-body text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Use URL instead
+                      </button>
+                    )}
+                  </div>
+                  <p className="font-body text-[11px] text-muted-foreground">
+                    PNG, JPG, WebP or GIF — up to 2 MB.
+                  </p>
                 </div>
               </div>
 
@@ -368,6 +437,33 @@ const Settings = () => {
                     </button>
                   </div>
                 )}
+              </div>
+
+              <div>
+                <p className="font-body text-sm text-muted-foreground mb-1">Country</p>
+                <div className="flex items-center gap-3">
+                  {profile.country && (
+                    <span className="text-2xl leading-none" aria-hidden>
+                      {countryFlag(profile.country)}
+                    </span>
+                  )}
+                  <select
+                    value={profile.country ?? ""}
+                    onChange={(e) => saveCountry(e.target.value)}
+                    disabled={saving}
+                    className="h-9 max-w-xs w-full rounded-md border border-border bg-secondary px-3 font-body text-sm text-foreground focus:border-foreground/35 focus:outline-none focus:ring-1 focus:ring-foreground/25 disabled:opacity-50"
+                  >
+                    <option value="">— No country —</option>
+                    {COUNTRIES.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {countryFlag(c.code)} {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="font-body text-[11px] text-muted-foreground mt-1">
+                  Your flag shows next to your name in games.
+                </p>
               </div>
 
               <div>

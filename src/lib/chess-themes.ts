@@ -16,8 +16,9 @@ export const BOARD_THEMES: Record<
   green: {
     label: "Green / White",
     description: "Tournament green felt squares",
-    chessLight: "70 38% 90%",
-    chessDark: "92 28% 44%",
+    // Chess.com board palette: #ebecd0 light / #739552 dark
+    chessLight: "62 42% 87%",
+    chessDark: "90 29% 45%",
   },
   wood: {
     label: "Wood",

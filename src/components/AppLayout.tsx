@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/use-profile";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { LogoMark } from "@/components/LogoMark";
+import { countryFlag } from "@/lib/countries";
 
 const NAV_ITEMS = [
   { to: "/dashboard", icon: Home,     label: "Home"     },
@@ -127,6 +128,9 @@ export function AppLayout({ children }: AppLayoutProps) {
               </Avatar>
               <div className="hidden lg:block min-w-0">
                 <p className="text-xs font-semibold text-foreground truncate leading-none">
+                  {profile.country && (
+                    <span className="mr-1" aria-hidden>{countryFlag(profile.country)}</span>
+                  )}
                   {profile.display_name || profile.username || "Player"}
                 </p>
                 <p className="text-[10px] text-muted-foreground leading-none mt-0.5">
