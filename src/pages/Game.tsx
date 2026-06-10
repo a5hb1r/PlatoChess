@@ -281,14 +281,25 @@ const Game = () => {
   const [foresightOn, setForesightOn] = useState(false);
   const [hoveredSquare, setHoveredSquare] = useState<Square | null>(null);
 
-  // Drag state
+  // Drag state. The pointer position deliberately lives OUTSIDE React state —
+  // updating it per mousemove would re-render the whole board ~60×/s and make
+  // the drag stutter. The ghost element is positioned directly via rAF.
   const [dragging, setDragging] = useState<{
     square: Square;
     piece: { color: string; type: string };
-    x: number;
-    y: number;
   } | null>(null);
   const [dragOver, setDragOver] = useState<Square | null>(null);
+  const dragPosRef = useRef({ x: 0, y: 0 });
+  const dragGhostRef = useRef<HTMLDivElement>(null);
+  const dragGhostSizeRef = useRef(72);
+  const dragRafRef = useRef(0);
+
+  const positionDragGhost = useCallback(() => {
+    const el = dragGhostRef.current;
+    if (!el) return;
+    const half = dragGhostSizeRef.current / 2;
+    el.style.transform = `translate(${dragPosRef.current.x - half}px, ${dragPosRef.current.y - half}px)`;
+  }, []);
 
   // Board orientation
   const [boardFlipped, setBoardFlipped] = useState(false);
@@ -810,7 +821,12 @@ const Game = () => {
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
 
-    setDragging({ square, piece: { color: piece.color, type: piece.type }, x: clientX, y: clientY });
+    // Ghost matches the live square size so the piece doesn't jump scale.
+    if (boardRef.current) {
+      dragGhostSizeRef.current = boardRef.current.getBoundingClientRect().width / 8;
+    }
+    dragPosRef.current = { x: clientX, y: clientY };
+    setDragging({ square, piece: { color: piece.color, type: piece.type } });
     setSelectedSquare(square);
     const moves = game.moves({ square, verbose: true });
     setValidMoves(moves.map((m) => m.to as Square));
@@ -820,10 +836,30 @@ const Game = () => {
     if (!dragging) return;
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
+      // Stop the page from scrolling underneath the piece on touch devices —
+      // the board must feel pinned while a drag is in progress.
+      if ("touches" in e && e.cancelable) e.preventDefault();
       const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
       const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-      setDragging((prev) => (prev ? { ...prev, x: clientX, y: clientY } : null));
-      if (boardRef.current) setDragOver(getSquareFromPoint(boardRef.current, clientX, clientY, boardFlipped));
+      dragPosRef.current = { x: clientX, y: clientY };
+
+      // Batch DOM work to one frame: move the ghost directly (no re-render)
+      // and only touch React state when the hovered square actually changes.
+      if (!dragRafRef.current) {
+        dragRafRef.current = requestAnimationFrame(() => {
+          dragRafRef.current = 0;
+          positionDragGhost();
+          if (boardRef.current) {
+            const sq = getSquareFromPoint(
+              boardRef.current,
+              dragPosRef.current.x,
+              dragPosRef.current.y,
+              boardFlipped
+            );
+            setDragOver((prev) => (prev === sq ? prev : sq));
+          }
+        });
+      }
     };
 
     const handleEnd = (e: MouseEvent | TouchEvent) => {
@@ -859,14 +895,20 @@ const Game = () => {
     window.addEventListener("mouseup", handleEnd);
     window.addEventListener("touchmove", handleMove, { passive: false });
     window.addEventListener("touchend", handleEnd);
+    window.addEventListener("touchcancel", handleEnd);
 
     return () => {
+      if (dragRafRef.current) {
+        cancelAnimationFrame(dragRafRef.current);
+        dragRafRef.current = 0;
+      }
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleEnd);
       window.removeEventListener("touchmove", handleMove);
       window.removeEventListener("touchend", handleEnd);
+      window.removeEventListener("touchcancel", handleEnd);
     };
-  }, [dragging, executeMove, game, validMoves]);
+  }, [dragging, executeMove, game, validMoves, boardFlipped, positionDragGhost]);
 
   const resetGame = useCallback(() => {
     setGame(new Chess());
@@ -1279,7 +1321,8 @@ const Game = () => {
                 {showLiveEval && <EvalBar cp={eval_} mate={evalMate} />}
 
                 <div className="relative flex-1 overflow-hidden rounded-xl border border-border shadow-elevated ring-1 ring-white/5">
-                  <div ref={boardRef} className="grid aspect-square w-full grid-cols-8 grid-rows-8">
+                  {/* touch-none: the board is not a scroll surface — piece drags must not pan the page */}
+                  <div ref={boardRef} className="grid aspect-square w-full select-none touch-none grid-cols-8 grid-rows-8">
                     {Array.from({ length: 64 }, (_, i) => {
                       const row = Math.floor(i / 8);
                       const col = i % 8;
@@ -1310,8 +1353,12 @@ const Game = () => {
                           onTouchStart={(e) => handleDragStart(square, e)}
                           onMouseEnter={() => foresightOn && setHoveredSquare(square)}
                           onMouseLeave={() => foresightOn && setHoveredSquare((s) => (s === square ? null : s))}
-                          className={`relative flex select-none items-center justify-center transition-[filter] ${
-                            isDark ? "bg-chess-dark hover:brightness-110" : "bg-chess-light hover:brightness-105"
+                          className={`relative flex select-none items-center justify-center ${
+                            dragging
+                              ? isDark ? "bg-chess-dark" : "bg-chess-light"
+                              : isDark
+                                ? "bg-chess-dark transition-[filter] hover:brightness-110"
+                                : "bg-chess-light transition-[filter] hover:brightness-105"
                           } ${
                             piece && piece.color === movableColor && (isFriendMode || game.turn() === "w") && !gameOver && !viewFen
                               ? "cursor-grab"
@@ -1394,11 +1441,16 @@ const Game = () => {
                     />
                   )}
 
-                  {/* Dragged piece ghost */}
+                  {/* Dragged piece ghost — positioned via transform outside React renders */}
                   {dragging && (
                     <div
-                      className="drag-ghost fixed z-[100] pointer-events-none"
-                      style={{ left: dragging.x - 36, top: dragging.y - 36, width: 72, height: 72 }}
+                      ref={dragGhostRef}
+                      className="drag-ghost fixed left-0 top-0 z-[100] pointer-events-none will-change-transform"
+                      style={{
+                        width: dragGhostSizeRef.current,
+                        height: dragGhostSizeRef.current,
+                        transform: `translate(${dragPosRef.current.x - dragGhostSizeRef.current / 2}px, ${dragPosRef.current.y - dragGhostSizeRef.current / 2}px)`,
+                      }}
                     >
                       <PieceImage color={dragging.piece.color as Color} type={dragging.piece.type} active className="h-full w-full opacity-95" />
                     </div>
