@@ -23,18 +23,24 @@ export interface GlyphMeta {
   title: string;
 }
 
-/** Canonical metadata for every classification label. */
+/**
+ * Canonical metadata for every classification label.
+ * Colors match Chess.com's analysis palette exactly:
+ * Brilliant #26c2a3 · Great #749bbf · Best #81b64c · Excellent #96bc4b ·
+ * Good #95af8a · Book #d5a47d · Inaccuracy #f7c631 · Mistake #ffa459 ·
+ * Miss #ff7769 · Blunder #fa412d
+ */
 export const GLYPH_META: Record<string, GlyphMeta> = {
   Brilliant: { shape: "double-bang", bg: "#26c2a3", fg: "#06281f", title: "Brilliant — a sharp, optimal sacrifice" },
-  Great: { shape: "bang", bg: "#5b8baf", fg: "#08151f", title: "Great move — the only move that holds or wins" },
-  Best: { shape: "check", bg: "#81b64c", fg: "#0f2107", title: "Best move — the top engine choice" },
-  Excellent: { shape: "check", bg: "#95b776", fg: "#10210a", title: "Excellent — keeps the advantage" },
-  Good: { shape: "dot", bg: "#7a9b6a", fg: "#0d1a08", title: "Good — a solid, reasonable move" },
-  Book: { shape: "book", bg: "#a88865", fg: "#241606", title: "Book — known opening theory" },
-  Inaccuracy: { shape: "ql", bg: "#f7c045", fg: "#2e2304", title: "Inaccuracy — slightly drops evaluation" },
-  Miss: { shape: "cross", bg: "#ee6b55", fg: "#2a0a05", title: "Missed win — a tactical shot or forced win was available" },
-  Mistake: { shape: "q", bg: "#e58f2a", fg: "#2a1804", title: "Mistake — noticeably worsens the position" },
-  Blunder: { shape: "qq", bg: "#ca3431", fg: "#2a0606", title: "Blunder — a major error or loss of material" },
+  Great: { shape: "bang", bg: "#749bbf", fg: "#08151f", title: "Great Move — the only move that holds or wins" },
+  Best: { shape: "check", bg: "#81b64c", fg: "#0f2107", title: "Best Move — the top engine choice" },
+  Excellent: { shape: "check", bg: "#96bc4b", fg: "#10210a", title: "Excellent — keeps the advantage" },
+  Good: { shape: "dot", bg: "#95af8a", fg: "#0d1a08", title: "Good — a solid, reasonable move" },
+  Book: { shape: "book", bg: "#d5a47d", fg: "#241606", title: "Book — known opening theory" },
+  Inaccuracy: { shape: "ql", bg: "#f7c631", fg: "#2e2304", title: "Inaccuracy — slightly drops evaluation" },
+  Miss: { shape: "cross", bg: "#ff7769", fg: "#2a0a05", title: "Miss — a tactical shot or forced win was available" },
+  Mistake: { shape: "q", bg: "#ffa459", fg: "#2a1804", title: "Mistake — noticeably worsens the position" },
+  Blunder: { shape: "qq", bg: "#fa412d", fg: "#2a0606", title: "Blunder — a major error or loss of material" },
 };
 
 /** True for labels that represent a damaging move (used to offer "Retry"). */

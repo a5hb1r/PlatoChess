@@ -15,12 +15,14 @@ export interface MoveQualityMeta {
 
 export const MOVE_QUALITY_ORDER: MoveQualityMeta[] = [
   { label: "Brilliant", icon: "🌟", symbol: "!!", title: "Brilliant", impact: "Game-changing, level-adjusted sacrifice" },
-  { label: "Great", icon: "⭐", symbol: "*", title: "Great Move", impact: "The single critical saving or winning move" },
+  { label: "Great", icon: "⭐", symbol: "!", title: "Great Move", impact: "The single critical saving or winning move" },
   { label: "Best", icon: "🟢", title: "Best Move", impact: "Top engine choice" },
   { label: "Excellent", icon: "✅", title: "Excellent", impact: "Kept the position solid" },
   { label: "Good", icon: "⚪", title: "Good", impact: "Sub-optimal but playable" },
-  { label: "Inaccuracy", icon: "🟡", symbol: "?", title: "Inaccuracy", impact: "Minor tactical slip" },
+  { label: "Book", icon: "📖", title: "Book", impact: "Known opening theory" },
+  { label: "Inaccuracy", icon: "🟡", symbol: "?!", title: "Inaccuracy", impact: "Minor tactical slip" },
   { label: "Mistake", icon: "🟠", symbol: "?", title: "Mistake", impact: "Lost a noticeable advantage" },
+  { label: "Miss", icon: "🟠", title: "Miss", impact: "A winning shot was available and not played" },
   { label: "Blunder", icon: "🔴", symbol: "??", title: "Blunder", impact: "Major tactical failure or material loss" },
 ];
 

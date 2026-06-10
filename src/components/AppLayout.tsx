@@ -7,6 +7,7 @@ import {
   BookOpen,
   BarChart2,
   Bot,
+  Library,
   Settings,
   LogOut,
   Upload,
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { to: "/openings",  icon: BookOpen, label: "Learn"    },
   { to: "/analyze",   icon: BarChart2,label: "Analysis" },
   { to: "/bots",      icon: Bot,      label: "Bots"     },
+  { to: "/research",  icon: Library,  label: "Research" },
   { to: "/import",    icon: Upload,   label: "Import"   },
   { to: "/pricing",   icon: DollarSign,label: "Upgrade" },
 ];

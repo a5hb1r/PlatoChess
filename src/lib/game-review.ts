@@ -26,6 +26,11 @@ export interface GameReviewReport {
     w: number;
     b: number;
   };
+  /** Estimated single-game performance rating per side (Chess.com-style "Game Rating"). */
+  gameRating?: {
+    w: { rating: number; acpl: number; moves: number };
+    b: { rating: number; acpl: number; moves: number };
+  };
   moves: ReviewedPly[];
 }
 
@@ -216,6 +221,8 @@ export function scoreForLabel(label: string): number {
       return 0.98;
     case "Best":
       return 0.96;
+    case "Book":
+      return 0.95;
     case "Excellent":
       return 0.9;
     case "Good":

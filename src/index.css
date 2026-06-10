@@ -231,3 +231,17 @@
     background: hsl(var(--secondary));
   }
 }
+
+/* ── Philosopher avatar animations ──────────────────────────────────────── */
+@keyframes plato-avatar-blink {
+  0%, 91%, 100% { transform: scaleY(1); }
+  94%, 96% { transform: scaleY(0.08); }
+}
+@keyframes plato-avatar-talk {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+@keyframes plato-avatar-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}

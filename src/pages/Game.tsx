@@ -19,6 +19,8 @@ import {
   FlipVertical2,
   Download,
   Copy,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Chess, Square, PieceSymbol, Color } from "chess.js";
@@ -39,7 +41,7 @@ import { ForesightOverlay } from "@/components/chess/ForesightOverlay";
 import { useChessClock } from "@/hooks/use-chess-clock";
 import { computeMaterial } from "@/lib/captured-material";
 import { attackedSquares, findPins, legalOrControlledMoves } from "@/lib/chess-foresight";
-import { probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
+import { isBookMove, probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
 import {
   type CoachId,
   coachOnEval,
@@ -55,6 +57,7 @@ import {
   updateGameHistoryAccuracy,
   type ReviewedPly,
 } from "@/lib/game-review";
+import { estimateGameRating } from "@/lib/game-rating";
 import { describeGameTermination } from "@/lib/game-termination";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/use-profile";
@@ -67,6 +70,14 @@ import {
   pickTaunt,
   type BotPersonality,
 } from "@/lib/bot-personalities";
+import {
+  getVoiceEnabled,
+  isVoiceSupported,
+  setVoiceEnabled as persistVoiceEnabled,
+  speakAsPhilosopher,
+  stopSpeaking,
+} from "@/lib/philosopher-voice";
+import { PhilosopherAvatar } from "@/components/chess/PhilosopherAvatar";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -219,6 +230,26 @@ const Game = () => {
   const [botMessages, setBotMessages] = useState<BotMsg[]>([]);
   const prevEvalRef = useRef<number>(0);
   const botMessageEndRef = useRef<HTMLDivElement>(null);
+
+  // Philosopher voice (Web Speech) + talking-avatar state
+  const [voiceOn, setVoiceOn] = useState<boolean>(() => getVoiceEnabled());
+  const [botSpeaking, setBotSpeaking] = useState(false);
+  const voiceOnRef = useRef(voiceOn);
+  voiceOnRef.current = voiceOn;
+  const namedBotIdRef = useRef<string | null>(namedBot?.id ?? null);
+  namedBotIdRef.current = namedBot?.id ?? null;
+
+  const toggleVoice = useCallback(() => {
+    setVoiceOn((prev) => {
+      const next = !prev;
+      persistVoiceEnabled(next);
+      if (!next) setBotSpeaking(false);
+      return next;
+    });
+  }, []);
+
+  // Silence the philosopher when leaving the page.
+  useEffect(() => () => stopSpeaking(), []);
 
   // Time control (minutes + Fischer increment seconds, defaults to 10|0).
   const initialMinutes = Number(searchParams.get("min")) || 10;
@@ -565,6 +596,13 @@ const Game = () => {
   const addBotMsg = useCallback((text: string, isBot = true) => {
     if (!text) return;
     setBotMessages((prev) => [...prev, { id: Date.now() + Math.random(), text, isBot }]);
+    // Speak the line aloud in the philosopher's voice.
+    if (isBot && voiceOnRef.current && namedBotIdRef.current) {
+      speakAsPhilosopher(namedBotIdRef.current, text, {
+        onStart: () => setBotSpeaking(true),
+        onEnd: () => setBotSpeaking(false),
+      });
+    }
   }, []);
 
   // Greeting when game starts
@@ -904,6 +942,7 @@ const Game = () => {
       const reviewed: { san: string; rating?: { label: string; color: string }; cpLoss?: number; bestUci?: string }[] = [];
       const reviewedPlies: ReviewedPly[] = [];
 
+      const sansSoFar: string[] = [];
       for (let i = 0; i < history.length; i++) {
         const mv = history[i];
         const side = replay.turn();
@@ -911,8 +950,12 @@ const Game = () => {
         const best = await engine.getBestMove(fenBefore, 10);
 
         replay.move(mv);
+        sansSoFar.push(mv.san);
         const afterProbe = await engine.probeEval(replay.fen(), 10, 2500);
-        const rated = rateMoveLikeChessCom(side, beforeProbe, afterProbe, mv, best || undefined);
+        let rated = rateMoveLikeChessCom(side, beforeProbe, afterProbe, mv, best || undefined);
+        if (isBookMove(sansSoFar) && rated.cpLoss <= 40) {
+          rated = { ...rated, label: "Book", color: "text-[#d5a47d]" };
+        }
         reviewed.push({
           san: mv.san,
           rating: { label: rated.label, color: rated.color },
@@ -942,13 +985,16 @@ const Game = () => {
         acc[k] = (acc[k] || 0) + 1;
         return acc;
       }, {});
-      const top = ["Brilliant", "Great", "Best", "Excellent", "Good", "Inaccuracy", "Miss", "Mistake", "Blunder"]
+      const top = ["Brilliant", "Great", "Best", "Excellent", "Good", "Book", "Inaccuracy", "Miss", "Mistake", "Blunder"]
         .filter((k) => summary[k])
         .map((k) => `${k}: ${summary[k]}`)
         .join("  |  ");
 
+      const gameRating = estimateGameRating(reviewedPlies);
       setMoveHistory(reviewed);
-      setReviewSummary(top || "Review complete.");
+      setReviewSummary(
+        `${top || "Review complete."}\nGame rating — You: ${gameRating.w.rating} · Stockfish: ${gameRating.b.rating}`
+      );
       setReviewReady(true);
       const bySide = { w: [] as number[], b: [] as number[] };
       for (const m of reviewedPlies) bySide[m.side].push(scoreForLabel(m.label));
@@ -961,6 +1007,7 @@ const Game = () => {
         engine: engineLabel,
         depth: 10,
         accuracy,
+        gameRating,
         moves: reviewedPlies,
       });
       // Persist accuracy into the game history entry created when the game ended.
@@ -990,17 +1037,18 @@ const Game = () => {
   }, [moveHistory]);
 
   // Ordered summary rows shown in the sidebar move-stats strip.
+  // Chess.com analysis palette — keep in sync with GLYPH_META.
   const MOVE_STATS_ORDER = [
     { label: "Brilliant", dot: "bg-[#26c2a3]" },
-    { label: "Great", dot: "bg-[#5b8baf]" },
+    { label: "Great", dot: "bg-[#749bbf]" },
     { label: "Best", dot: "bg-[#81b64c]" },
-    { label: "Excellent", dot: "bg-[#95b776]" },
-    { label: "Good", dot: "bg-[#7a9b6a]" },
-    { label: "Book", dot: "bg-[#a88865]" },
-    { label: "Inaccuracy", dot: "bg-[#f7c045]" },
-    { label: "Miss", dot: "bg-[#ee6b55]" },
-    { label: "Mistake", dot: "bg-[#e58f2a]" },
-    { label: "Blunder", dot: "bg-[#ca3431]" },
+    { label: "Excellent", dot: "bg-[#96bc4b]" },
+    { label: "Good", dot: "bg-[#95af8a]" },
+    { label: "Book", dot: "bg-[#d5a47d]" },
+    { label: "Inaccuracy", dot: "bg-[#f7c631]" },
+    { label: "Miss", dot: "bg-[#ff7769]" },
+    { label: "Mistake", dot: "bg-[#ffa459]" },
+    { label: "Blunder", dot: "bg-[#fa412d]" },
   ] as const;
 
   const moveStatsVisible = reviewReady && moveHistory.some((m) => m.rating?.label);
@@ -1705,7 +1753,7 @@ const Game = () => {
                 )}
                 {reviewSummary && (
                   <div className="rounded-lg bg-secondary/50 border border-border px-3 py-2">
-                    <p className="font-body text-[11px] leading-relaxed text-foreground/80">{reviewSummary}</p>
+                    <p className="font-body text-[11px] leading-relaxed text-foreground/80 whitespace-pre-line">{reviewSummary}</p>
                   </div>
                 )}
                 {reviewReady && (
@@ -1758,20 +1806,42 @@ const Game = () => {
             {/* Bot personality chat panel */}
             {botPersonality && (
               <div className="rounded-lg border border-border bg-card flex flex-col overflow-hidden">
-                {/* Header */}
-                <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border bg-secondary/40">
-                  <span className="text-xl leading-none">{namedBot?.emoji}</span>
-                  <div>
+                {/* Header — animated avatar + voice toggle */}
+                <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-border bg-secondary/40">
+                  {namedBot && (
+                    <PhilosopherAvatar
+                      botId={namedBot.id}
+                      speaking={botSpeaking}
+                      size={40}
+                      className="shrink-0 -my-1"
+                    />
+                  )}
+                  <div className="min-w-0">
                     <p className="font-display text-sm font-semibold text-foreground leading-none">
                       {botPersonality.displayName}
                     </p>
-                    <p className="font-body text-[10px] text-muted-foreground mt-0.5">
-                      {botPersonality.tagline}
+                    <p className="font-body text-[10px] text-muted-foreground mt-0.5 truncate">
+                      {botSpeaking ? "Speaking…" : botPersonality.tagline}
                     </p>
                   </div>
-                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                  <span className="ml-auto font-mono text-[10px] text-muted-foreground shrink-0">
                     {namedBot?.ratingLabel}
                   </span>
+                  {isVoiceSupported() && (
+                    <button
+                      type="button"
+                      onClick={toggleVoice}
+                      title={voiceOn ? "Mute philosopher voice" : "Unmute philosopher voice"}
+                      aria-label={voiceOn ? "Mute philosopher voice" : "Unmute philosopher voice"}
+                      className={`shrink-0 rounded-md border p-1.5 transition-colors ${
+                        voiceOn
+                          ? "border-primary/50 bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {voiceOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+                    </button>
+                  )}
                 </div>
 
                 {/* Messages */}

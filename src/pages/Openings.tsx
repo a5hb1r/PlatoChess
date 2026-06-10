@@ -1,20 +1,44 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Chess, Square } from "chess.js";
-import { ArrowLeft, BookOpen, ChevronLeft, ChevronRight, GraduationCap, RotateCcw, Target, Lock, Crown } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  GraduationCap,
+  RotateCcw,
+  Target,
+  Lock,
+  Crown,
+  Lightbulb,
+} from "lucide-react";
 import {
   OPENING_CHAPTERS,
   OPENING_FAMILIES,
   OPENING_LINES,
+  openingLineAvailable,
   type OpeningLine,
 } from "@/data/openings";
 import { PIECE_URLS } from "@/lib/chess-constants";
 import { playMoveSound } from "@/lib/sounds";
+import { useProfile } from "@/hooks/use-profile";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+const TIER_CHIP: Record<string, string> = {
+  free: "text-emerald-400 bg-emerald-400/10 border-emerald-400/30",
+  pro: "text-amber-400 bg-amber-400/10 border-amber-400/30",
+  master: "text-violet-400 bg-violet-400/10 border-violet-400/30",
+};
+
 const Openings = () => {
   const navigate = useNavigate();
+  const { isPro, isMaster } = useProfile();
+  const devMode = import.meta.env.DEV;
+
+  const unlocked = (l: OpeningLine) => devMode || openingLineAvailable(l, isPro, isMaster);
+
   const [family, setFamily] = useState<string>(OPENING_FAMILIES[0]);
   const [line, setLine] = useState<OpeningLine | null>(OPENING_LINES[0] ?? null);
   const [ply, setPly] = useState(0);
@@ -37,6 +61,10 @@ const Openings = () => {
 
   const displayGame = new Chess(fen);
 
+  /** Theory note for the most recently played move (null at the start). */
+  const currentTheory = line && ply > 0 ? line.theory[ply - 1] : null;
+  const nextTheory = line && ply < line.moves.length ? line.theory[ply] : null;
+
   const goStart = () => {
     setPly(0);
     setFeedback(null);
@@ -49,6 +77,10 @@ const Openings = () => {
   };
 
   const onPickLine = (l: OpeningLine) => {
+    if (!unlocked(l)) {
+      navigate("/pricing");
+      return;
+    }
     setLine(l);
     setPly(0);
     setFeedback(null);
@@ -90,6 +122,8 @@ const Openings = () => {
     }
   };
 
+  const freeCount = OPENING_LINES.filter((l) => l.tier === "free").length;
+
   return (
     <div className="min-h-screen bg-background">
       <nav className="border-b border-border/50 bg-background/80 backdrop-blur-md">
@@ -108,7 +142,7 @@ const Openings = () => {
             <div className="ml-auto flex items-center gap-2">
               <span className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 font-body text-xs font-semibold text-amber-400">
                 <Crown className="h-3 w-3" />
-                Pro &amp; Master
+                {freeCount} free · {OPENING_LINES.length} lines with full theory
               </span>
             </div>
           </div>
@@ -158,8 +192,10 @@ const Openings = () => {
                   className={family === f ? "bg-primary text-primary-foreground" : ""}
                   onClick={() => {
                     setFamily(f);
-                    const first = OPENING_LINES.find((l) => l.family === f);
-                    if (first) onPickLine(first);
+                    const first = OPENING_LINES.find(
+                      (l) => l.family === f && (devMode || openingLineAvailable(l, isPro, isMaster))
+                    ) ?? OPENING_LINES.find((l) => l.family === f);
+                    if (first && unlocked(first)) onPickLine(first);
                   }}
                 >
                   {f}
@@ -174,24 +210,36 @@ const Openings = () => {
               Lines ({linesInFamily.length})
             </div>
             <ul className="divide-y divide-border">
-              {linesInFamily.map((l) => (
-                <li key={l.id}>
-                  <button
-                    type="button"
-                    onClick={() => onPickLine(l)}
-                    className={cn(
-                      "w-full text-left px-4 py-3 font-body text-sm transition-colors hover:bg-secondary",
-                      line?.id === l.id && "bg-secondary border-l-2 border-foreground/40"
-                    )}
-                  >
-                    <span className="font-semibold text-foreground block">{l.name}</span>
-                    {l.eco && <span className="text-xs text-muted-foreground">ECO {l.eco}</span>}
-                    <span className="text-xs text-muted-foreground block mt-0.5">
-                      Depth {l.moves.length} plies
-                    </span>
-                  </button>
-                </li>
-              ))}
+              {linesInFamily.map((l) => {
+                const open = unlocked(l);
+                return (
+                  <li key={l.id}>
+                    <button
+                      type="button"
+                      onClick={() => onPickLine(l)}
+                      className={cn(
+                        "w-full text-left px-4 py-3 font-body text-sm transition-colors hover:bg-secondary",
+                        line?.id === l.id && "bg-secondary border-l-2 border-foreground/40",
+                        !open && "opacity-60"
+                      )}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground">{l.name}</span>
+                        {!open && <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />}
+                        <span
+                          className={`ml-auto shrink-0 rounded-full border px-2 py-0.5 font-body text-[9px] font-semibold uppercase tracking-wider ${TIER_CHIP[l.tier]}`}
+                        >
+                          {l.tier}
+                        </span>
+                      </span>
+                      {l.eco && <span className="text-xs text-muted-foreground">ECO {l.eco}</span>}
+                      <span className="text-xs text-muted-foreground block mt-0.5">
+                        Depth {l.moves.length} plies · theory on every move
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </aside>
@@ -199,6 +247,24 @@ const Openings = () => {
         <main className="lg:col-span-8 space-y-6">
           {line && (
             <>
+              {/* Line summary */}
+              <div className="rounded-lg border border-border bg-card p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="font-display text-lg font-bold">{line.name}</h2>
+                  {line.eco && (
+                    <span className="font-mono text-xs text-muted-foreground">ECO {line.eco}</span>
+                  )}
+                  <span
+                    className={`ml-auto rounded-full border px-2 py-0.5 font-body text-[10px] font-semibold uppercase tracking-wider ${TIER_CHIP[line.tier]}`}
+                  >
+                    {line.tier}
+                  </span>
+                </div>
+                <p className="mt-1.5 font-body text-sm text-foreground/80 leading-relaxed">
+                  {line.summary}
+                </p>
+              </div>
+
               <div className="flex flex-wrap items-center gap-3">
                 <Button variant="outline" size="icon" onClick={goStart}>
                   <RotateCcw className="h-4 w-4" />
@@ -244,6 +310,33 @@ const Openings = () => {
                 </p>
               )}
 
+              {/* Theory note for the current position */}
+              <div className="rounded-lg border border-primary/25 bg-primary/5 px-4 py-3 flex items-start gap-3">
+                <Lightbulb className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
+                <div className="font-body text-sm text-foreground/85 leading-relaxed">
+                  {ply === 0 ? (
+                    <>
+                      <span className="font-semibold">Starting position.</span>{" "}
+                      {nextTheory
+                        ? `Next: ${line.moves[0]} — ${nextTheory}`
+                        : "Step through the line to read the theory for every move."}
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-mono font-semibold">
+                        {Math.ceil(ply / 2)}.{ply % 2 === 0 ? ".." : ""} {line.moves[ply - 1]}
+                      </span>{" "}
+                      — {currentTheory}
+                      {!quiz && nextTheory && (
+                        <span className="block mt-1 text-xs text-muted-foreground">
+                          Next: {line.moves[ply]} — {nextTheory}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                 <div className="rounded-lg overflow-hidden border border-border shadow-elevated aspect-square max-w-[480px] w-full mx-auto grid grid-cols-8 grid-rows-8">
                   {Array.from({ length: 64 }, (_, i) => {
@@ -279,28 +372,35 @@ const Openings = () => {
                   })}
                 </div>
 
-                <div className="rounded-lg border border-border bg-card p-4">
+                {/* Annotated move list */}
+                <div className="rounded-lg border border-border bg-card p-4 max-h-[480px] overflow-y-auto">
                   <h3 className="font-display text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">
-                    Main line (SAN)
+                    Theory — move by move
                   </h3>
-                  <div className="font-mono text-xs leading-7 text-foreground flex flex-wrap gap-x-2 gap-y-1">
+                  <ol className="space-y-1.5">
                     {line.moves.map((mv, i) => (
-                      <span
-                        key={i}
-                        className={cn(
-                          i < ply && "text-muted-foreground",
-                          i === ply && "text-foreground/75 font-semibold"
-                        )}
-                      >
-                        {mv}
-                        {i < line.moves.length - 1 ? " - " : ""}
-                      </span>
+                      <li key={i}>
+                        <button
+                          type="button"
+                          onClick={() => !quiz && setPly(i + 1)}
+                          className={cn(
+                            "w-full text-left rounded-md px-2 py-1.5 transition-colors",
+                            i === ply - 1
+                              ? "bg-primary/15 border border-primary/30"
+                              : "hover:bg-secondary border border-transparent",
+                            i >= ply && "opacity-70"
+                          )}
+                        >
+                          <span className="font-mono text-xs font-semibold text-foreground">
+                            {Math.ceil((i + 1) / 2)}.{i % 2 === 1 ? ".." : ""} {mv}
+                          </span>
+                          <span className="block font-body text-[11px] text-muted-foreground leading-snug mt-0.5">
+                            {line.theory[i]}
+                          </span>
+                        </button>
+                      </li>
                     ))}
-                  </div>
-                  <p className="mt-4 text-xs text-muted-foreground font-body">
-                    {OPENING_LINES.length} named lines across major families - extend{" "}
-                    <code className="text-foreground/70">src/data/openings.ts</code> anytime.
-                  </p>
+                  </ol>
                 </div>
               </div>
             </>

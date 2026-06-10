@@ -176,7 +176,7 @@ export default function AnalyzeGame() {
 
   // Per-side classification tallies for the Coach's Breakdown summary.
   const breakdown = useMemo(() => {
-    const make = () => ({ Brilliant: 0, Great: 0, Best: 0, Excellent: 0, Good: 0, Inaccuracy: 0, Miss: 0, Mistake: 0, Blunder: 0 } as Record<string, number>);
+    const make = () => ({ Brilliant: 0, Great: 0, Best: 0, Excellent: 0, Good: 0, Book: 0, Inaccuracy: 0, Miss: 0, Mistake: 0, Blunder: 0 } as Record<string, number>);
     const w = make();
     const b = make();
     for (const m of moves) {
@@ -683,6 +683,31 @@ export default function AnalyzeGame() {
                 <p className="font-mono text-lg">{report!.accuracy.b.toFixed(1)}%</p>
               </div>
             </div>
+            {report!.gameRating && (
+              <>
+                <p className="font-display text-sm font-semibold pt-1">Game Rating</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md border border-[#81b64c]/30 bg-[#81b64c]/5 p-2">
+                    <p className="text-[10px] text-muted-foreground uppercase">White</p>
+                    <p className="font-display text-xl font-bold text-foreground">
+                      {report!.gameRating.w.rating}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      ACPL {report!.gameRating.w.acpl}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border bg-background p-2">
+                    <p className="text-[10px] text-muted-foreground uppercase">Black</p>
+                    <p className="font-display text-xl font-bold text-foreground">
+                      {report!.gameRating.b.rating}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      ACPL {report!.gameRating.b.acpl}
+                    </p>
+                  </div>
+                </div>
+              </>
+            )}
             <p className="text-xs text-muted-foreground">{report!.result}</p>
             {transitionMs !== null && (
               <p className="text-[11px] text-muted-foreground">
@@ -705,7 +730,7 @@ export default function AnalyzeGame() {
               <span />
               <span className="text-center text-[10px] font-semibold uppercase text-muted-foreground">You</span>
               <span className="text-center text-[10px] font-semibold uppercase text-muted-foreground">Bot</span>
-              {["Brilliant", "Great", "Best", "Excellent", "Good", "Inaccuracy", "Miss", "Mistake", "Blunder"].map((label) => (
+              {["Brilliant", "Great", "Best", "Excellent", "Good", "Book", "Inaccuracy", "Miss", "Mistake", "Blunder"].map((label) => (
                 <Fragment key={label}>
                   <span className="flex items-center gap-1.5 text-xs">
                     <MoveGlyph label={label} size={15} />

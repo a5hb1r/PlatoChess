@@ -1,6 +1,7 @@
 import { Chess } from "chess.js";
-import { probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
+import { isBookMove, probeResultToCp, rateMoveLikeChessCom } from "@/lib/move-rating";
 import { scoreForLabel, type GameReviewReport, type ReviewedPly } from "@/lib/game-review";
+import { estimateGameRating } from "@/lib/game-rating";
 import type { StockfishEngine } from "@/lib/stockfish";
 
 interface BuildReviewParams {
@@ -31,6 +32,7 @@ export async function buildGameReviewReport({
   let beforeProbe = await engine.probeEval(replay.fen(), depth, 2500);
   const reviewedPlies: ReviewedPly[] = [];
 
+  const sansSoFar: string[] = [];
   for (let i = 0; i < history.length; i++) {
     const mv = history[i];
     const side = replay.turn();
@@ -38,8 +40,13 @@ export async function buildGameReviewReport({
     const best = await engine.getBestMove(fenBefore, depth);
 
     replay.move(mv);
+    sansSoFar.push(mv.san);
     const afterProbe = await engine.probeEval(replay.fen(), depth, 2500);
-    const rated = rateMoveLikeChessCom(side, beforeProbe, afterProbe, mv, best || undefined);
+    let rated = rateMoveLikeChessCom(side, beforeProbe, afterProbe, mv, best || undefined);
+    // Opening theory beats engine nit-picking: known book moves show as Book.
+    if (isBookMove(sansSoFar) && rated.cpLoss <= 40) {
+      rated = { ...rated, label: "Book", color: "text-[#d5a47d]" };
+    }
     reviewedPlies.push({
       ply: i + 1,
       side,
@@ -72,6 +79,7 @@ export async function buildGameReviewReport({
       w: Number(avg(bySide.w).toFixed(1)),
       b: Number(avg(bySide.b).toFixed(1)),
     },
+    gameRating: estimateGameRating(reviewedPlies),
     moves: reviewedPlies,
   };
 }

@@ -4,6 +4,7 @@ import { ArrowLeft, Lock, Swords, X } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { BOTS, isBotUnlocked, type Bot } from "@/lib/bots";
 import { useProfile } from "@/hooks/use-profile";
+import { PhilosopherAvatar } from "@/components/chess/PhilosopherAvatar";
 
 const TIER_LABELS: Record<string, string> = {
   free: "Free",
@@ -52,8 +53,10 @@ function LockedBotModal({ bot, onClose }: { bot: Bot; onClose: () => void }) {
             <X className="h-5 w-5" />
           </button>
 
-          {/* Bot emoji */}
-          <div className="text-5xl mb-3">{bot.emoji}</div>
+          {/* Bot portrait */}
+          <div className="flex justify-center mb-3">
+            <PhilosopherAvatar botId={bot.id} size={72} />
+          </div>
 
           {/* Lock icon */}
           <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-secondary mb-4 mx-auto">
@@ -134,9 +137,9 @@ function BotCard({
         {TIER_LABELS[bot.tier]}
       </span>
 
-      {/* Avatar / emoji */}
-      <div className={`text-3xl leading-none ${!unlocked ? "grayscale opacity-60" : ""}`}>
-        {bot.emoji}
+      {/* Animated portrait */}
+      <div className={!unlocked ? "grayscale opacity-60" : ""}>
+        <PhilosopherAvatar botId={bot.id} size={52} />
       </div>
 
       {/* Name + title */}

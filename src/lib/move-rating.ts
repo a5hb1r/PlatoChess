@@ -1,7 +1,24 @@
 import { Chess, type Color, type Move, type PieceSymbol } from "chess.js";
+import { OPENING_LINES } from "@/data/openings";
 
 /** Elo at/above which a player is treated as "high level" for brilliancy scaling. */
 export const BRILLIANT_ELO_THRESHOLD = 1200;
+
+/** Plies beyond which we stop checking the book (no line is longer anyway). */
+const BOOK_PLY_LIMIT = 16;
+
+/**
+ * Chess.com-style "Book" detection: the move sequence so far (including the
+ * candidate move as the last element) still follows a known opening line.
+ */
+export function isBookMove(sanHistory: string[]): boolean {
+  if (sanHistory.length === 0 || sanHistory.length > BOOK_PLY_LIMIT) return false;
+  return OPENING_LINES.some(
+    (line) =>
+      sanHistory.length <= line.moves.length &&
+      sanHistory.every((san, i) => line.moves[i] === san)
+  );
+}
 
 const PIECE_VALUE: Record<PieceSymbol, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
@@ -164,9 +181,9 @@ export function rateMoveLikeChessCom(
     // best sacrifice earns Brilliant; visible/standard ones downgrade to Best.
     const verdict = brilliancyVerdictForLevel(options?.playerElo, options?.isOnlyGoodMove ?? isBest);
     if (verdict === "brilliant") {
-      return { label: "Brilliant", color: "text-[#14b8a6] font-semibold", cpLoss, bestMove: bestMoveUci };
+      return { label: "Brilliant", color: "text-[#26c2a3] font-semibold", cpLoss, bestMove: bestMoveUci };
     }
-    return { label: "Best", color: "text-foreground", cpLoss, bestMove: bestMoveUci };
+    return { label: "Best", color: "text-[#81b64c]", cpLoss, bestMove: bestMoveUci };
   }
   // Missed win: the side was clearly winning (or had a forced mate) and let
   // most of that advantage slip. Flagged distinctly from a plain mistake.
@@ -175,27 +192,27 @@ export function rateMoveLikeChessCom(
     ((beforeForSide >= 250 && afterForSide < 120) ||
       (beforeMateForSide !== undefined && beforeMateForSide > 0))
   ) {
-    return { label: "Miss", color: "text-[#f97316]", cpLoss, bestMove: bestMoveUci };
+    return { label: "Miss", color: "text-[#ff7769]", cpLoss, bestMove: bestMoveUci };
   }
   // Great: the precise, often only move that holds a difficult or worse
   // position together (matches the engine's top choice while under pressure).
   if (isBest && beforeForSide <= -40 && cpLoss <= 15) {
-    return { label: "Great", color: "text-[#1d4ed8]", cpLoss, bestMove: bestMoveUci };
+    return { label: "Great", color: "text-[#749bbf]", cpLoss, bestMove: bestMoveUci };
   }
   if (isBest || cpLoss <= 10) {
-    return { label: "Best", color: "text-foreground", cpLoss, bestMove: bestMoveUci };
+    return { label: "Best", color: "text-[#81b64c]", cpLoss, bestMove: bestMoveUci };
   }
   if (cpLoss <= 30) {
-    return { label: "Excellent", color: "text-muted-foreground", cpLoss, bestMove: bestMoveUci };
+    return { label: "Excellent", color: "text-[#96bc4b]", cpLoss, bestMove: bestMoveUci };
   }
   if (cpLoss <= 60) {
-    return { label: "Good", color: "text-muted-foreground/90", cpLoss, bestMove: bestMoveUci };
+    return { label: "Good", color: "text-[#95af8a]", cpLoss, bestMove: bestMoveUci };
   }
   if (cpLoss <= 110) {
-    return { label: "Inaccuracy", color: "text-foreground/70", cpLoss, bestMove: bestMoveUci };
+    return { label: "Inaccuracy", color: "text-[#f7c631]", cpLoss, bestMove: bestMoveUci };
   }
   if (cpLoss <= 190) {
-    return { label: "Mistake", color: "text-foreground/55", cpLoss, bestMove: bestMoveUci };
+    return { label: "Mistake", color: "text-[#ffa459]", cpLoss, bestMove: bestMoveUci };
   }
-  return { label: "Blunder", color: "text-destructive", cpLoss, bestMove: bestMoveUci };
+  return { label: "Blunder", color: "text-[#fa412d]", cpLoss, bestMove: bestMoveUci };
 }

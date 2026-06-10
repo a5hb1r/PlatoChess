@@ -25,6 +25,7 @@ const Privacy = lazy(() => import("./pages/Privacy.tsx"));
 const Terms = lazy(() => import("./pages/Terms.tsx"));
 const Pricing = lazy(() => import("./pages/Pricing.tsx"));
 const Bots = lazy(() => import("./pages/Bots.tsx"));
+const Research = lazy(() => import("./pages/Research.tsx"));
 const ImportGame = lazy(() => import("./pages/ImportGame.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
@@ -76,6 +77,7 @@ const App = () => {
                   <Route path="/analyze"  element={<Analyze />} />
                   <Route path="/openings" element={<Openings />} />
                   <Route path="/bots"     element={<Bots />} />
+                  <Route path="/research" element={<Research />} />
                   <Route path="/import"   element={<ImportGame />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/pricing"  element={<Pricing />} />

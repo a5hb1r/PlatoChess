@@ -10,56 +10,57 @@ const DEFAULT_TONE: ReviewTone = {
   row: "border-l-foreground/30",
 };
 
+/** Chess.com analysis palette — keep in sync with GLYPH_META in move-glyph-meta.ts. */
 const TONES: Record<string, ReviewTone> = {
   Brilliant: {
-    text: "text-[#14b8a6]",
-    chip: "bg-[#14b8a6]/15 text-[#99f6e4] border-[#14b8a6]/40",
-    row: "border-l-[#14b8a6]/70",
+    text: "text-[#26c2a3]",
+    chip: "bg-[#26c2a3]/15 text-[#7ee9d4] border-[#26c2a3]/40",
+    row: "border-l-[#26c2a3]/70",
   },
   Great: {
-    text: "text-[#1d4ed8]",
-    chip: "bg-[#1d4ed8]/15 text-[#bfdbfe] border-[#1d4ed8]/40",
-    row: "border-l-[#1d4ed8]/70",
+    text: "text-[#749bbf]",
+    chip: "bg-[#749bbf]/15 text-[#b8d2e8] border-[#749bbf]/40",
+    row: "border-l-[#749bbf]/70",
   },
   Best: {
-    text: "text-[#22c55e]",
-    chip: "bg-[#22c55e]/15 text-[#bbf7d0] border-[#22c55e]/40",
-    row: "border-l-[#22c55e]/70",
+    text: "text-[#81b64c]",
+    chip: "bg-[#81b64c]/15 text-[#c6e3a2] border-[#81b64c]/40",
+    row: "border-l-[#81b64c]/70",
   },
   Excellent: {
-    text: "text-[#22c55e]",
-    chip: "bg-[#22c55e]/15 text-[#bbf7d0] border-[#22c55e]/40",
-    row: "border-l-[#22c55e]/70",
+    text: "text-[#96bc4b]",
+    chip: "bg-[#96bc4b]/15 text-[#d2e8a6] border-[#96bc4b]/40",
+    row: "border-l-[#96bc4b]/70",
   },
   Good: {
-    text: "text-[#22c55e]",
-    chip: "bg-[#22c55e]/15 text-[#bbf7d0] border-[#22c55e]/40",
-    row: "border-l-[#22c55e]/70",
+    text: "text-[#95af8a]",
+    chip: "bg-[#95af8a]/15 text-[#d3e0cc] border-[#95af8a]/40",
+    row: "border-l-[#95af8a]/70",
   },
   Book: {
-    text: "text-[#8b5e34]",
-    chip: "bg-[#8b5e34]/20 text-[#f3e4cf] border-[#8b5e34]/45",
-    row: "border-l-[#8b5e34]/70",
+    text: "text-[#d5a47d]",
+    chip: "bg-[#d5a47d]/20 text-[#f0dcc8] border-[#d5a47d]/45",
+    row: "border-l-[#d5a47d]/70",
   },
   Inaccuracy: {
-    text: "text-[#eab308]",
-    chip: "bg-[#eab308]/15 text-[#fef08a] border-[#eab308]/40",
-    row: "border-l-[#eab308]/70",
+    text: "text-[#f7c631]",
+    chip: "bg-[#f7c631]/15 text-[#fbe79a] border-[#f7c631]/40",
+    row: "border-l-[#f7c631]/70",
   },
   Miss: {
-    text: "text-[#f97316]",
-    chip: "bg-[#f97316]/15 text-[#fed7aa] border-[#f97316]/40",
-    row: "border-l-[#f97316]/70",
+    text: "text-[#ff7769]",
+    chip: "bg-[#ff7769]/15 text-[#ffc4bd] border-[#ff7769]/40",
+    row: "border-l-[#ff7769]/70",
   },
   Mistake: {
-    text: "text-[#f97316]",
-    chip: "bg-[#f97316]/15 text-[#fed7aa] border-[#f97316]/40",
-    row: "border-l-[#f97316]/70",
+    text: "text-[#ffa459]",
+    chip: "bg-[#ffa459]/15 text-[#ffd6b3] border-[#ffa459]/40",
+    row: "border-l-[#ffa459]/70",
   },
   Blunder: {
-    text: "text-[#dc2626]",
-    chip: "bg-[#dc2626]/15 text-[#fecaca] border-[#dc2626]/40",
-    row: "border-l-[#dc2626]/70",
+    text: "text-[#fa412d]",
+    chip: "bg-[#fa412d]/15 text-[#fda99f] border-[#fa412d]/40",
+    row: "border-l-[#fa412d]/70",
   },
 };
 
