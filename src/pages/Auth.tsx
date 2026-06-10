@@ -15,6 +15,7 @@ const Auth = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [magicLoading, setMagicLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const navigate = useNavigate();
 
   const normalizeUsername = (value: string) => value.trim().replace(/[^a-zA-Z0-9_]/g, "");
@@ -86,6 +87,27 @@ const Auth = () => {
       const message = error instanceof Error ? error.message : "Sign-in failed";
       toast.error(message);
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      toast.error("Enter your email address first.");
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+        redirectTo: `${window.location.origin}/auth`,
+      });
+      if (error) throw error;
+      toast.success("Password reset email sent. Check your inbox.");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Could not send reset email";
+      toast.error(message);
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -280,8 +302,18 @@ const Auth = () => {
               disabled={magicLoading}
               className="w-full border border-border py-3 rounded-md font-body text-sm font-semibold text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
             >
-              {magicLoading ? "Sending..." : "Send Magic Link (SMTP Email)"}
+              {magicLoading ? "Sending..." : "Send Magic Link"}
             </button>
+            {isLogin && (
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                disabled={resetLoading}
+                className="w-full font-body text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                {resetLoading ? "Sending reset email..." : "Forgot password?"}
+              </button>
+            )}
           </form>
 
           {/* Toggle */}

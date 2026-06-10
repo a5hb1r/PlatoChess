@@ -84,7 +84,9 @@ const PricingSection = () => {
 
               <div className="mb-6">
                 <span className="font-display text-4xl font-bold">
-                  ${(product.priceInCents / 100).toFixed(0)}
+                  ${product.priceInCents === 0
+                    ? "0"
+                    : (product.priceInCents / 100).toFixed(2).replace(/\.00$/, "")}
                 </span>
                 <span className="font-body text-sm text-muted-foreground ml-1">{product.period}</span>
               </div>

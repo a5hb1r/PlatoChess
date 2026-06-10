@@ -10,6 +10,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { GuestOnboarding } from "@/components/GuestOnboarding";
 import { GuestBanner } from "@/components/GuestBanner";
 import { AppLayout } from "@/components/AppLayout";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index.tsx";
 const Play = lazy(() => import("./pages/Play.tsx"));
 const Game = lazy(() => import("./pages/Game.tsx"));
@@ -53,6 +54,7 @@ const App = () => {
         <BrowserRouter>
           <ThemeProvider>
             <AuthProvider>
+              <ErrorBoundary>
               <GuestOnboarding />
               <GuestBanner />
               <Routes>
@@ -82,6 +84,7 @@ const App = () => {
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                 <Route path="*" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><NotFound /></Suspense>} />
               </Routes>
+              </ErrorBoundary>
             </AuthProvider>
           </ThemeProvider>
         </BrowserRouter>

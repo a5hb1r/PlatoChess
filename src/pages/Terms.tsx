@@ -34,6 +34,15 @@ const Terms = () => {
           </p>
         </section>
         <section className="space-y-2">
+          <h2 className="font-display text-lg text-foreground">Subscriptions &amp; Billing</h2>
+          <p>
+            Paid plans (Pro and Master) are billed monthly. You may cancel at any time from your Settings page — your
+            access continues until the end of the current billing period and no further charges are made. We do not
+            offer refunds for partial billing periods, but if you believe a charge was made in error please contact us
+            within 14 days and we will review it.
+          </p>
+        </section>
+        <section className="space-y-2">
           <h2 className="font-display text-lg text-foreground">No warranty</h2>
           <p>
             Platochess is provided "as is." We work to keep the service reliable but do not guarantee uninterrupted
