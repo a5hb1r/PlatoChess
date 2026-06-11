@@ -10,6 +10,8 @@ export interface StockfishInfo {
   score?: number;
   mate?: number;
   pvLine?: string;
+  /** First move of the principal variation, in UCI (e.g. "e2e4"). */
+  pv?: string;
   multipv?: number;
 }
 

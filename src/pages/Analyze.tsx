@@ -13,6 +13,7 @@ import { playMoveSound } from "@/lib/sounds";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { type CoachId, coachOnEval, COACHES } from "@/lib/philosopher-coaches";
+import { BoardArrows, type BoardArrow } from "@/components/chess/BoardArrows";
 
 const examplePgn = `[Event "Casual"]
 [Site "PlatoChess"]
@@ -47,6 +48,10 @@ const Analyze = () => {
   const [targets, setTargets] = useState<Square[]>([]);
   const [coachId, setCoachId] = useState<CoachId>("none");
   const [coachMsg, setCoachMsg] = useState<string | null>(null);
+  /** First move of the engine's current PV — drawn live as a green arrow. */
+  const [liveBestUci, setLiveBestUci] = useState<string | null>(null);
+  /** Explicit deep suggestion from the "Show best move" button. */
+  const [suggestion, setSuggestion] = useState<{ from: Square; to: Square; san: string; uci: string } | null>(null);
 
   const engineRef = useRef<StockfishEngine | null>(null);
 
@@ -97,6 +102,9 @@ const Analyze = () => {
   }, []);
 
   useEffect(() => {
+    // New position: clear the previous suggestion/arrow before re-evaluating.
+    setSuggestion(null);
+    setLiveBestUci(null);
     if (!engineReady || !engineRef.current) return;
     engineRef.current.evaluate(fen, 20, (info: StockfishInfo) => {
       if (info.mate !== undefined) {
@@ -108,6 +116,7 @@ const Analyze = () => {
       }
       if (info.depth) setDepth(info.depth);
       if (info.pvLine) setPvLine(info.pvLine);
+      if (info.pv && info.pv.length >= 4) setLiveBestUci(info.pv);
     });
   }, [fen, engineReady]);
 
@@ -145,8 +154,27 @@ const Analyze = () => {
 
   const whiteBar = Math.max(5, Math.min(95, 50 + Math.max(-5, Math.min(5, evalCp / 100)) * 8));
 
+  /** First click: reveal the best move (arrow + SAN). Second click: play it. */
   const suggestBest = async () => {
     if (!engineRef.current || busy) return;
+
+    // Second click — play the revealed move.
+    if (suggestion) {
+      const g = new Chess(fen);
+      const promotion = suggestion.uci.length > 4 ? suggestion.uci[4] : undefined;
+      const m = g.move({
+        from: suggestion.from,
+        to: suggestion.to,
+        promotion: promotion as "q" | "r" | "b" | "n" | undefined,
+      });
+      if (m) {
+        playMoveSound(m, g.isCheck());
+        setFen(g.fen());
+      }
+      return;
+    }
+
+    // First click — compute and show it.
     setBusy(true);
     const uci = await engineRef.current.getBestMove(fen, 18);
     setBusy(false);
@@ -154,13 +182,24 @@ const Analyze = () => {
     const from = uci.slice(0, 2) as Square;
     const to = uci.slice(2, 4) as Square;
     const promotion = uci.length > 4 ? uci[4] : undefined;
-    const g = new Chess(fen);
-    const m = g.move({ from, to, promotion: promotion as "q" | "r" | "b" | "n" | undefined });
-    if (m) {
-      playMoveSound(m, g.isCheck());
-      setFen(g.fen());
-    }
+    const probe = new Chess(fen);
+    const m = probe.move({ from, to, promotion: promotion as "q" | "r" | "b" | "n" | undefined });
+    if (m) setSuggestion({ from, to, san: m.san, uci });
   };
+
+  // Arrows: the explicit suggestion wins; otherwise the live engine PV arrow.
+  const boardArrows: BoardArrow[] = suggestion
+    ? [{ from: suggestion.from, to: suggestion.to, color: "#81b64c", opacity: 0.95 }]
+    : liveBestUci
+      ? [
+          {
+            from: liveBestUci.slice(0, 2) as Square,
+            to: liveBestUci.slice(2, 4) as Square,
+            color: "#81b64c",
+            opacity: 0.55,
+          },
+        ]
+      : [];
 
   const onSquareClick = (sq: Square) => {
     const piece = displayGame.get(sq);
@@ -236,11 +275,22 @@ const Analyze = () => {
             <Button onClick={loadPgn} variant="default" className="bg-primary text-primary-foreground">
               Load game
             </Button>
-            <Button onClick={suggestBest} disabled={!engineReady || busy} variant="outline">
+            <Button
+              onClick={suggestBest}
+              disabled={!engineReady || busy}
+              variant={suggestion ? "default" : "outline"}
+              className={suggestion ? "bg-[#81b64c] text-[#0f2107] hover:bg-[#81b64c]/90" : ""}
+            >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 mr-1" />}
-              Best move (analysis board)
+              {suggestion ? `Play ${suggestion.san}` : "Show best move"}
             </Button>
           </div>
+          {suggestion && (
+            <p className="font-body text-sm text-foreground/85">
+              Engine&apos;s best move: <span className="font-mono font-semibold text-[#81b64c]">{suggestion.san}</span>
+              <span className="text-muted-foreground"> — shown as the arrow on the board. Click again to play it.</span>
+            </p>
+          )}
           {error && <p className="text-sm text-destructive font-body">{error}</p>}
 
           <div className="rounded-lg border border-border bg-card p-4 space-y-2">
@@ -278,7 +328,7 @@ const Analyze = () => {
             <div className="w-5 rounded-md border border-border bg-muted flex flex-col-reverse overflow-hidden">
               <div className="bg-ivory transition-all duration-300" style={{ height: `${whiteBar}%` }} />
             </div>
-            <div className="flex-1 grid grid-cols-8 grid-rows-8 aspect-square rounded-lg overflow-hidden border border-border shadow-elevated">
+            <div className="relative flex-1 grid grid-cols-8 grid-rows-8 aspect-square rounded-lg overflow-hidden border border-border shadow-elevated">
               {Array.from({ length: 64 }, (_, i) => {
                 const row = Math.floor(i / 8);
                 const col = i % 8;
@@ -310,6 +360,7 @@ const Analyze = () => {
                   </button>
                 );
               })}
+              <BoardArrows arrows={boardArrows} />
             </div>
           </div>
 

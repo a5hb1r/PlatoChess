@@ -46,6 +46,7 @@ function incrementDailyCount(): number {
 import { Chess, Color, Square, PieceSymbol } from "chess.js";
 import { ChessSounds, playMoveSound } from "@/lib/sounds";
 import { PIECE_URLS } from "@/lib/chess-constants";
+import { BoardArrows } from "@/components/chess/BoardArrows";
 import { loadPersonalizedPuzzles } from "@/lib/game-review";
 import {
   fetchPuzzleBatch,
@@ -157,7 +158,8 @@ const Puzzles = () => {
   const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
   const [moveIndex, setMoveIndex] = useState(0);
   const [status, setStatus] = useState<"solving" | "correct" | "wrong" | "complete">("solving");
-  const [showHint, setShowHint] = useState(false);
+  /** 0 = hidden, 1 = show which piece to move, 2 = reveal the answer move. */
+  const [hintLevel, setHintLevel] = useState<0 | 1 | 2>(0);
   const [solved, setSolved] = useState<Set<string>>(new Set());
   const [streak, setStreak] = useState(0);
   const [lichessPuzzles, setLichessPuzzles] = useState<Puzzle[]>([]);
@@ -231,7 +233,7 @@ const Puzzles = () => {
     setValidMoves([]);
     setLastMove(null);
     setStatus("solving");
-    setShowHint(false);
+    setHintLevel(0);
     setDragging(null);
     setDragOver(null);
   }, [currentPuzzle]);
@@ -243,6 +245,26 @@ const Puzzles = () => {
       promotion: uci.length > 4 ? uci[4] : undefined,
     };
   };
+
+  /** The actual next solution move — powers the two-stage hint. */
+  const hintAnswer = useMemo(() => {
+    if (!game || !currentPuzzle || status !== "solving") return null;
+    const uci = currentPuzzle.solution[moveIndex];
+    if (!uci || uci.length < 4) return null;
+    const from = uci.slice(0, 2) as Square;
+    const to = uci.slice(2, 4) as Square;
+    const promotion = uci.length > 4 ? uci[4] : undefined;
+    const clone = new Chess(game.fen());
+    const names: Record<string, string> = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
+    const pieceName = names[clone.get(from)?.type ?? ""] ?? "piece";
+    try {
+      const m = clone.move({ from, to, promotion: promotion as "q" | "r" | "b" | "n" | undefined });
+      if (!m) return null;
+      return { from, to, san: m.san, pieceName };
+    } catch {
+      return null;
+    }
+  }, [game, currentPuzzle, moveIndex, status]);
 
   const executePlayerMove = useCallback(
     (from: Square, to: Square) => {
@@ -442,7 +464,7 @@ const Puzzles = () => {
     setValidMoves([]);
     setLastMove(null);
     setStatus("solving");
-    setShowHint(false);
+    setHintLevel(0);
   };
 
   if (!game || !currentPuzzle) return null;
@@ -596,24 +618,38 @@ const Puzzles = () => {
                 </span>
               </div>
 
-              {/* Hint */}
+              {/* Hint — first click shows the piece, second reveals the move */}
               <button
-                onClick={() => setShowHint(!showHint)}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-border text-sm font-body text-muted-foreground hover:text-foreground transition-colors mb-3"
+                onClick={() => setHintLevel((lvl) => (lvl === 0 ? 1 : lvl === 1 ? 2 : 0))}
+                disabled={!hintAnswer}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-border text-sm font-body text-muted-foreground hover:text-foreground transition-colors mb-3 disabled:opacity-50"
               >
                 <Lightbulb className="w-4 h-4 text-foreground/75" />
-                {showHint ? "Hide Hint" : "Show Hint"}
+                {hintLevel === 0 ? "Show Hint" : hintLevel === 1 ? "Reveal Answer" : "Hide Hint"}
               </button>
               <AnimatePresence>
-                {showHint && (
-                  <motion.p
+                {hintLevel > 0 && hintAnswer && (
+                  <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="font-body text-sm text-foreground/65 italic"
+                    className="font-body text-sm space-y-1"
                   >
-                    Hint: {currentPuzzle.hint}
-                  </motion.p>
+                    {hintLevel === 1 ? (
+                      <p className="text-foreground/80">
+                        Move your <span className="font-semibold text-foreground">{hintAnswer.pieceName}</span> on{" "}
+                        <span className="font-mono font-semibold text-foreground">{hintAnswer.from}</span> — it&apos;s
+                        highlighted on the board.
+                      </p>
+                    ) : (
+                      <p className="text-foreground/80">
+                        Answer:{" "}
+                        <span className="font-mono font-semibold text-[#81b64c]">{hintAnswer.san}</span>
+                        <span className="text-muted-foreground"> ({hintAnswer.from} → {hintAnswer.to}) — follow the arrow.</span>
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground italic">{currentPuzzle.hint}</p>
+                  </motion.div>
                 )}
               </AnimatePresence>
             </div>
@@ -667,6 +703,9 @@ const Puzzles = () => {
                       {isSelected && (
                         <div className="absolute inset-0 bg-foreground/25 z-10" />
                       )}
+                      {hintLevel >= 1 && hintAnswer?.from === square && (
+                        <div className="absolute inset-0 z-10" style={{ backgroundColor: "rgba(255,255,51,0.5)" }} />
+                      )}
                       {isDragTarget && (
                         <div className="absolute inset-0 bg-foreground/20 z-10" />
                       )}
@@ -715,6 +754,13 @@ const Puzzles = () => {
                   );
                 })}
               </div>
+
+              {hintLevel === 2 && hintAnswer && (
+                <BoardArrows
+                  arrows={[{ from: hintAnswer.from, to: hintAnswer.to, opacity: 0.9 }]}
+                  flipped={flipped}
+                />
+              )}
 
               {/* Dragged piece ghost */}
               {dragging && (
