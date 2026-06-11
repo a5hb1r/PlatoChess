@@ -78,6 +78,7 @@ import {
   stopSpeaking,
 } from "@/lib/philosopher-voice";
 import { PhilosopherAvatar } from "@/components/chess/PhilosopherAvatar";
+import { BoardArrows, type BoardArrow } from "@/components/chess/BoardArrows";
 import { supabase } from "@/integrations/supabase/client";
 import { countryFlag } from "@/lib/countries";
 import { toast } from "sonner";
@@ -301,8 +302,75 @@ const Game = () => {
     el.style.transform = `translate(${dragPosRef.current.x - half}px, ${dragPosRef.current.y - half}px)`;
   }, []);
 
+  // ── User annotations — chess.com-style right-click arrows & highlights ────
+  // Right-drag draws an arrow, right-click marks a square; modifier keys pick
+  // the color (Shift=green, Ctrl=red, Alt=blue). Left click clears everything.
+  const [userArrows, setUserArrows] = useState<BoardArrow[]>([]);
+  const [userHighlights, setUserHighlights] = useState<{ square: Square; color: string }[]>([]);
+  const [drawStart, setDrawStart] = useState<Square | null>(null);
+  const [drawPreview, setDrawPreview] = useState<Square | null>(null);
+
+  const clearAnnotations = useCallback(() => {
+    setUserArrows((prev) => (prev.length ? [] : prev));
+    setUserHighlights((prev) => (prev.length ? [] : prev));
+  }, []);
+
   // Board orientation
   const [boardFlipped, setBoardFlipped] = useState(false);
+
+  // Commit/preview right-click drawings (declared after boardFlipped — the
+  // handlers map pointer coordinates through the current orientation).
+  useEffect(() => {
+    if (!drawStart) return;
+
+    const annotationColor = (e: { shiftKey: boolean; ctrlKey: boolean; altKey: boolean }) =>
+      e.shiftKey ? "#81b64c" : e.ctrlKey ? "#f42a32" : e.altKey ? "#52aeff" : "#ffaa00";
+
+    const handleMove = (e: MouseEvent) => {
+      if (!boardRef.current) return;
+      const sq = getSquareFromPoint(boardRef.current, e.clientX, e.clientY, boardFlipped);
+      setDrawPreview((prev) => (prev === sq ? prev : sq));
+    };
+
+    const handleUp = (e: MouseEvent) => {
+      if (e.button !== 2) return;
+      const start = drawStart;
+      setDrawStart(null);
+      setDrawPreview(null);
+      if (!boardRef.current) return;
+      const target = getSquareFromPoint(boardRef.current, e.clientX, e.clientY, boardFlipped);
+      if (!target) return;
+      const color = annotationColor(e);
+
+      if (target === start) {
+        // Toggle a square highlight (same color removes, new color recolors).
+        setUserHighlights((prev) => {
+          const existing = prev.find((h) => h.square === start);
+          if (existing && existing.color === color) return prev.filter((h) => h.square !== start);
+          return [...prev.filter((h) => h.square !== start), { square: start, color }];
+        });
+      } else {
+        // Toggle an arrow.
+        setUserArrows((prev) => {
+          const existing = prev.find((a) => a.from === start && a.to === target);
+          if (existing && existing.color === color) {
+            return prev.filter((a) => a !== existing);
+          }
+          return [
+            ...prev.filter((a) => !(a.from === start && a.to === target)),
+            { from: start, to: target, color, opacity: 0.85 },
+          ];
+        });
+      }
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [drawStart, boardFlipped]);
 
   // Premove state
   const [premoveEnabled, setPremoveEnabled] = useState<boolean>(() => {
@@ -740,6 +808,7 @@ const Game = () => {
   const movableColor: Color = isFriendMode ? game.turn() : "w";
 
   const handleSquareClick = (square: Square) => {
+    clearAnnotations(); // chess.com behavior: any left click wipes drawings
     if (gameOver || viewFen || dragging) return;
 
     const piece = game.get(square);
@@ -804,6 +873,8 @@ const Game = () => {
 
   // --- Drag and Drop ---
   const handleDragStart = (square: Square, e: React.MouseEvent | React.TouchEvent) => {
+    if ("button" in e && e.button !== 0) return; // only left button drags pieces
+    clearAnnotations();
     if ((isEngineOpponent && game.turn() !== "w") || engineThinking || gameOver || viewFen) return;
     const piece = game.get(square);
     if (!piece || piece.color !== movableColor) return;
@@ -906,6 +977,10 @@ const Game = () => {
     setSelectedSquare(null);
     setValidMoves([]);
     setLastMove(null);
+    setUserArrows([]);
+    setUserHighlights([]);
+    setDrawStart(null);
+    setDrawPreview(null);
     setMoveHistory([]);
     setEval_(0);
     setEvalMate(null);
@@ -1313,7 +1388,11 @@ const Game = () => {
 
                 <div className="relative flex-1 overflow-hidden rounded-[5px] shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
                   {/* touch-none: the board is not a scroll surface — piece drags must not pan the page */}
-                  <div ref={boardRef} className="grid aspect-square w-full select-none touch-none grid-cols-8 grid-rows-8">
+                  <div
+                    ref={boardRef}
+                    onContextMenu={(e) => e.preventDefault()}
+                    className="grid aspect-square w-full select-none touch-none grid-cols-8 grid-rows-8"
+                  >
                     {Array.from({ length: 64 }, (_, i) => {
                       const row = Math.floor(i / 8);
                       const col = i % 8;
@@ -1332,7 +1411,15 @@ const Game = () => {
                         <div
                           key={square}
                           onClick={() => handleSquareClick(square)}
-                          onMouseDown={(e) => handleDragStart(square, e)}
+                          onMouseDown={(e) => {
+                            if (e.button === 2) {
+                              e.preventDefault();
+                              setDrawStart(square);
+                              setDrawPreview(square);
+                              return;
+                            }
+                            handleDragStart(square, e);
+                          }}
                           onTouchStart={(e) => handleDragStart(square, e)}
                           onMouseEnter={() => foresightOn && setHoveredSquare(square)}
                           onMouseLeave={() => foresightOn && setHoveredSquare((s) => (s === square ? null : s))}
@@ -1347,6 +1434,17 @@ const Game = () => {
                           {/* Last move highlight (chess.com yellow) */}
                           {isLastMoveSquare && !viewFen && (
                             <div className="absolute inset-0" style={{ backgroundColor: "rgba(255,255,51,0.45)" }} />
+                          )}
+
+                          {/* Right-click square highlight */}
+                          {userHighlights.map((h) =>
+                            h.square === square ? (
+                              <div
+                                key={h.square}
+                                className="absolute inset-0 z-[8]"
+                                style={{ backgroundColor: h.color, opacity: 0.5 }}
+                              />
+                            ) : null
                           )}
 
                           {/* Selected highlight */}
@@ -1423,6 +1521,19 @@ const Game = () => {
                       greenSquares={foresightDots.green}
                       pins={foresightPins}
                       orientation="white"
+                    />
+                  )}
+
+                  {/* User-drawn arrows (right-click drag) + live preview */}
+                  {(userArrows.length > 0 || (drawStart && drawPreview && drawPreview !== drawStart)) && (
+                    <BoardArrows
+                      flipped={boardFlipped}
+                      arrows={[
+                        ...userArrows,
+                        ...(drawStart && drawPreview && drawPreview !== drawStart
+                          ? [{ from: drawStart, to: drawPreview, color: "#ffaa00", opacity: 0.5 }]
+                          : []),
+                      ]}
                     />
                   )}
 
