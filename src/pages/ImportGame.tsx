@@ -458,7 +458,7 @@ const ImportGame = () => {
                             <img
                               src={PIECE_URLS[piece.color][piece.type]}
                               alt={`${piece.color}${piece.type}`}
-                              className="z-20 h-[84%] w-[84%] select-none object-contain drop-shadow-md pointer-events-none"
+                              className="z-20 h-[94%] w-[94%] select-none object-contain drop-shadow-md pointer-events-none"
                               draggable={false}
                             />
                           )}

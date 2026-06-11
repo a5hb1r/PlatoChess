@@ -792,7 +792,7 @@ export default function AnalyzeGame() {
                       <img
                         src={PIECE_URLS[piece.color][piece.type]}
                         alt=""
-                        className="w-[82%] h-[82%] object-contain absolute inset-0 m-auto pointer-events-none drop-shadow-[0_2px_3px_rgba(0,0,0,0.35)]"
+                        className="w-[94%] h-[94%] object-contain absolute inset-0 m-auto pointer-events-none drop-shadow-[0_2px_3px_rgba(0,0,0,0.35)]"
                         draggable={false}
                       />
                     )}

@@ -1,19 +1,23 @@
-/** Wikimedia Cburnett piece SVGs (same set used across boards). */
+/**
+ * Chessnut piece set (Alexis Luengas, Apache 2.0) — vendored locally in
+ * /public/pieces/chessnut so pieces load instantly with no third-party
+ * network dependency. A clean, bold, modern set in the chess.com spirit.
+ */
 export const PIECE_URLS: Record<string, Record<string, string>> = {
   w: {
-    k: "https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg",
-    q: "https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg",
-    r: "https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg",
-    b: "https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg",
-    n: "https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg",
-    p: "https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg",
+    k: "/pieces/chessnut/wK.svg",
+    q: "/pieces/chessnut/wQ.svg",
+    r: "/pieces/chessnut/wR.svg",
+    b: "/pieces/chessnut/wB.svg",
+    n: "/pieces/chessnut/wN.svg",
+    p: "/pieces/chessnut/wP.svg",
   },
   b: {
-    k: "https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg",
-    q: "https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg",
-    r: "https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg",
-    b: "https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg",
-    n: "https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg",
-    p: "https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg",
+    k: "/pieces/chessnut/bK.svg",
+    q: "/pieces/chessnut/bQ.svg",
+    r: "/pieces/chessnut/bR.svg",
+    b: "/pieces/chessnut/bB.svg",
+    n: "/pieces/chessnut/bN.svg",
+    p: "/pieces/chessnut/bP.svg",
   },
 };

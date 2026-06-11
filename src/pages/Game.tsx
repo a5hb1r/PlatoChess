@@ -344,15 +344,6 @@ const Game = () => {
   const displayFen = viewFen || game.fen();
   const displayGame = useMemo(() => new Chess(displayFen), [displayFen]);
 
-  const allLegalDestinations = useMemo(() => {
-    const s = new Set<Square>();
-    if ((isEngineOpponent && gameTurn !== "w") || gameIsOver || viewFen) return s;
-    for (const m of game.moves({ verbose: true })) {
-      if (m.color === gameTurn) s.add(m.to as Square);
-    }
-    return s;
-  }, [game, gameTurn, gameIsOver, viewFen, isEngineOpponent]);
-
   const clearQueuedPremove = useCallback(() => {
     setQueuedPremove(null);
     localStorage.removeItem(PREMOVE_QUEUE_STORAGE_KEY);
@@ -1320,7 +1311,7 @@ const Game = () => {
               <div className="flex items-stretch gap-2">
                 {showLiveEval && <EvalBar cp={eval_} mate={evalMate} />}
 
-                <div className="relative flex-1 overflow-hidden rounded-xl border border-border shadow-elevated ring-1 ring-white/5">
+                <div className="relative flex-1 overflow-hidden rounded-[5px] shadow-[0_12px_32px_rgba(0,0,0,0.45)]">
                   {/* touch-none: the board is not a scroll surface — piece drags must not pan the page */}
                   <div ref={boardRef} className="grid aspect-square w-full select-none touch-none grid-cols-8 grid-rows-8">
                     {Array.from({ length: 64 }, (_, i) => {
@@ -1336,14 +1327,6 @@ const Game = () => {
                       const isLastMoveSquare = lastMove?.from === square || lastMove?.to === square;
                       const isDragSource = dragging?.square === square;
                       const isDragTarget = dragOver === square && isValidTarget;
-                      const showAmbienceDots =
-                        !selectedSquare &&
-                        !dragging &&
-                        !foresightOn &&
-                        (isFriendMode || game.turn() === "w") &&
-                        !gameOver &&
-                        !viewFen &&
-                        allLegalDestinations.has(square);
 
                       return (
                         <div
@@ -1354,11 +1337,7 @@ const Game = () => {
                           onMouseEnter={() => foresightOn && setHoveredSquare(square)}
                           onMouseLeave={() => foresightOn && setHoveredSquare((s) => (s === square ? null : s))}
                           className={`relative flex select-none items-center justify-center ${
-                            dragging
-                              ? isDark ? "bg-chess-dark" : "bg-chess-light"
-                              : isDark
-                                ? "bg-chess-dark transition-[filter] hover:brightness-110"
-                                : "bg-chess-light transition-[filter] hover:brightness-105"
+                            isDark ? "bg-chess-dark" : "bg-chess-light"
                           } ${
                             piece && piece.color === movableColor && (isFriendMode || game.turn() === "w") && !gameOver && !viewFen
                               ? "cursor-grab"
@@ -1375,15 +1354,12 @@ const Game = () => {
                             <div className="absolute inset-0 z-10" style={{ backgroundColor: "rgba(255,255,51,0.58)" }} />
                           )}
 
-                          {/* Drag target highlight */}
+                          {/* Drag target — chess.com's thick translucent frame */}
                           {isDragTarget && (
-                            <div className="absolute inset-0 z-10" style={{ backgroundColor: "rgba(129,182,76,0.40)" }} />
-                          )}
-
-                          {showAmbienceDots && (
-                            <div className="pointer-events-none absolute z-[15] flex h-full w-full items-center justify-center">
-                              <div className="h-[14%] w-[14%] rounded-full bg-foreground/12 ring-1 ring-foreground/10" />
-                            </div>
+                            <div
+                              className="absolute inset-0 z-10"
+                              style={{ boxShadow: "inset 0 0 0 4px rgba(255,255,255,0.65)" }}
+                            />
                           )}
 
                           {/* Coords */}
@@ -1408,23 +1384,32 @@ const Game = () => {
 
                           {/* Piece */}
                           {piece && !isDragSource && (
-                            <PieceImage color={piece.color} type={piece.type} active={isSelected} className="z-20 h-[84%] w-[84%]" />
+                            <PieceImage color={piece.color} type={piece.type} active={isSelected} className="z-20 h-[96%] w-[96%]" />
                           )}
 
-                          {/* Valid move indicator (green) */}
-                          {isValidTarget && !isDragTarget && (
+                          {/* Move hints — chess.com's translucent dark dot / capture ring */}
+                          {showValidMoves && isValidTarget && !isDragTarget && (
                             <div className="pointer-events-none absolute z-30 flex h-full w-full items-center justify-center">
                               {piece && !isDragSource ? (
-                                <div className="h-[84%] w-[84%] rounded-full border-[5px]" style={{ borderColor: "rgba(129,182,76,0.55)" }} />
+                                <div
+                                  className="h-full w-full rounded-full"
+                                  style={{ boxShadow: "inset 0 0 0 6px rgba(0,0,0,0.14)" }}
+                                />
                               ) : (
-                                <div className="h-[30%] w-[30%] rounded-full" style={{ backgroundColor: "rgba(129,182,76,0.45)" }} />
+                                <div className="h-[33%] w-[33%] rounded-full" style={{ backgroundColor: "rgba(0,0,0,0.14)" }} />
                               )}
                             </div>
                           )}
 
-                          {/* Check highlight */}
+                          {/* Check highlight — radial red glow under the king */}
                           {piece?.type === "k" && displayGame.inCheck() && piece.color === displayGame.turn() && (
-                            <div className="absolute inset-0 z-[5] rounded-full bg-destructive/45" />
+                            <div
+                              className="absolute inset-0 z-[5]"
+                              style={{
+                                background:
+                                  "radial-gradient(circle at center, rgba(255,0,0,0.65) 0%, rgba(231,0,0,0.45) 40%, rgba(169,0,0,0) 80%)",
+                              }}
+                            />
                           )}
                         </div>
                       );

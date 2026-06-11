@@ -363,7 +363,7 @@ const Openings = () => {
                           <img
                             src={PIECE_URLS[piece.color][piece.type]}
                             alt=""
-                            className="w-[82%] h-[82%] object-contain pointer-events-none"
+                            className="w-[94%] h-[94%] object-contain pointer-events-none"
                             draggable={false}
                           />
                         )}

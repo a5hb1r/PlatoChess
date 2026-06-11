@@ -695,7 +695,7 @@ const Puzzles = () => {
                         <img
                           src={PIECE_URLS[piece.color][piece.type]}
                           alt={`${piece.color} ${piece.type}`}
-                          className={`w-[82%] h-[82%] object-contain drop-shadow-md select-none pointer-events-none z-20 transition-transform duration-150 ${
+                          className={`w-[94%] h-[94%] object-contain drop-shadow-md select-none pointer-events-none z-20 transition-transform duration-150 ${
                             isSelected ? "scale-110 drop-shadow-xl" : ""
                           }`}
                           draggable={false}

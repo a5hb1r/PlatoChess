@@ -281,7 +281,7 @@ const Research = () => {
                             <img
                               src={PIECE_URLS[piece.color][piece.type]}
                               alt=""
-                              className="relative w-[82%] h-[82%] object-contain pointer-events-none"
+                              className="relative w-[94%] h-[94%] object-contain pointer-events-none"
                               draggable={false}
                             />
                           )}
