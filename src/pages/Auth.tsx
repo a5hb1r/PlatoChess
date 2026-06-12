@@ -1,13 +1,17 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Mail, Lock, User, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, User, ArrowLeft, Eye, EyeOff, MailCheck, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import logo from "@/assets/platochess-logo.png";
 
+/** OAuth buttons stay hidden until the providers are configured in Supabase. */
+const OAUTH_ENABLED = import.meta.env.VITE_ENABLE_OAUTH === "true";
+
 const Auth = () => {
-  const [isLogin, setIsLogin] = useState(true);
+  const [searchParams] = useSearchParams();
+  const [isLogin, setIsLogin] = useState(() => searchParams.get("mode") !== "signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -16,7 +20,29 @@ const Auth = () => {
   const [loading, setLoading] = useState(false);
   const [magicLoading, setMagicLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  /** Set when an account exists but its email still needs confirming. */
+  const [awaitingConfirm, setAwaitingConfirm] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
   const navigate = useNavigate();
+
+  const resendConfirmation = async () => {
+    if (!awaitingConfirm) return;
+    setResending(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: awaitingConfirm,
+        options: { emailRedirectTo: `${window.location.origin}/play` },
+      });
+      if (error) throw error;
+      toast.success("Confirmation email re-sent. Check your inbox and spam folder.");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Could not resend email";
+      toast.error(message);
+    } finally {
+      setResending(false);
+    }
+  };
 
   const normalizeUsername = (value: string) => value.trim().replace(/[^a-zA-Z0-9_]/g, "");
 
@@ -37,7 +63,14 @@ const Auth = () => {
     try {
       if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (error) {
+          // Unconfirmed accounts get a resend path instead of a dead end.
+          if (error.message.toLowerCase().includes("not confirmed")) {
+            setAwaitingConfirm(email.trim());
+            return;
+          }
+          throw error;
+        }
         toast.success("Welcome back!");
         navigate("/play");
       } else {
@@ -48,7 +81,7 @@ const Auth = () => {
           return;
         }
 
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -56,11 +89,19 @@ const Auth = () => {
               full_name: displayName.trim(),
               username: normalizedUsername,
             },
-            emailRedirectTo: window.location.origin,
+            emailRedirectTo: `${window.location.origin}/play`,
           },
         });
         if (error) throw error;
-        toast.success("Account created! Check your email to confirm.");
+
+        if (data.session) {
+          // Email confirmation is off — the account works immediately.
+          toast.success("Account created — you're all set!");
+          navigate("/play");
+        } else {
+          // Confirmation required: show the inbox screen with a resend option.
+          setAwaitingConfirm(email.trim());
+        }
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Authentication failed";
@@ -186,8 +227,42 @@ const Auth = () => {
             </h1>
           </div>
 
-          {/* OAuth buttons */}
-          <div className="space-y-3 mb-6">
+          {/* Email-confirmation pending state */}
+          {awaitingConfirm ? (
+            <div className="text-center space-y-4 py-4">
+              <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 border border-primary/30">
+                <MailCheck className="h-6 w-6 text-primary" />
+              </span>
+              <h2 className="font-display text-xl font-bold">Confirm your email</h2>
+              <p className="font-body text-sm text-muted-foreground leading-relaxed">
+                We sent a confirmation link to{" "}
+                <span className="font-semibold text-foreground">{awaitingConfirm}</span>.
+                Click it to activate your account, then sign in.
+              </p>
+              <p className="font-body text-xs text-muted-foreground">
+                Nothing arriving? Check your spam folder, or resend below.
+              </p>
+              <button
+                type="button"
+                onClick={resendConfirmation}
+                disabled={resending}
+                className="w-full bg-primary py-3 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100 inline-flex items-center justify-center gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${resending ? "animate-spin" : ""}`} />
+                {resending ? "Sending…" : "Resend confirmation email"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAwaitingConfirm(null)}
+                className="w-full border border-border py-3 rounded-md font-body text-sm font-semibold text-foreground transition-colors hover:bg-secondary"
+              >
+                Back
+              </button>
+            </div>
+          ) : (
+          <>
+          {/* OAuth buttons — hidden until providers are configured in Supabase */}
+          <div className={OAUTH_ENABLED ? "space-y-3 mb-6" : "hidden"}>
             <button
               onClick={() => handleOAuth("google")}
               disabled={loading}
@@ -216,17 +291,19 @@ const Auth = () => {
             </button>
           </div>
 
-          {/* Divider */}
-          <div className="relative mb-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-border" />
+          {/* Divider — only meaningful when OAuth buttons are visible */}
+          {OAUTH_ENABLED && (
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center">
+                <span className="bg-card px-3 font-body text-xs text-muted-foreground">
+                  or continue with email
+                </span>
+              </div>
             </div>
-            <div className="relative flex justify-center">
-              <span className="bg-card px-3 font-body text-xs text-muted-foreground">
-                or continue with email
-              </span>
-            </div>
-          </div>
+          )}
 
           {/* Email form */}
           <form onSubmit={handleEmailAuth} className="space-y-4">
@@ -326,6 +403,8 @@ const Auth = () => {
               {isLogin ? "Sign up" : "Sign in"}
             </button>
           </p>
+          </>
+          )}
         </div>
       </motion.div>
     </div>

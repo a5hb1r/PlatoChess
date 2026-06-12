@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { getGuestSession, migrateGuestToProfile } from "@/lib/guest-session";
 import { toast } from "sonner";
 
 interface AuthContextType {
@@ -23,6 +24,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const migrationAttemptedFor = useRef<string | null>(null);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -41,6 +43,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // When a guest signs up (any path — password, magic link, OAuth), carry
+  // their local rating/placement progress into the new account exactly once.
+  useEffect(() => {
+    if (!user || migrationAttemptedFor.current === user.id) return;
+    if (!getGuestSession()?.onboardingComplete) return;
+    migrationAttemptedFor.current = user.id;
+
+    migrateGuestToProfile(user.id).then((result) => {
+      if (result === "migrated") {
+        toast.success("Account saved — your guest rating and progress are now synced.");
+      }
+    });
+  }, [user]);
 
   useEffect(() => {
     if (!user || !session?.access_token) return;

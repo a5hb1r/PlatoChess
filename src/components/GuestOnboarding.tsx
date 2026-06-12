@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight, Crown, Sprout, Trophy, Zap } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -148,9 +149,9 @@ export function GuestOnboarding() {
 
             <p className="text-center font-body text-xs text-muted-foreground mt-6">
               No account needed to start.{" "}
-              <a href="/auth" className="underline hover:text-foreground">
+              <Link to="/auth?mode=signup" className="underline hover:text-foreground">
                 Sign up
-              </a>{" "}
+              </Link>{" "}
               anytime to save your progress permanently.
             </p>
           </motion.div>

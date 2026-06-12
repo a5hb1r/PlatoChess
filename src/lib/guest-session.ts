@@ -1,7 +1,9 @@
 /**
  * Guest session — stored entirely in localStorage.
- * No Supabase account needed. When the user signs up, we migrate this data.
+ * No Supabase account needed. When the user signs up, migrateGuestToProfile
+ * copies the guest's rating/placement progress into their fresh profile.
  */
+import { supabase } from "@/integrations/supabase/client";
 
 export interface GuestSession {
   rating: number;
@@ -28,6 +30,44 @@ export function saveGuestSession(session: GuestSession): void {
 
 export function clearGuestSession(): void {
   localStorage.removeItem(KEY);
+}
+
+/**
+ * Copy a guest's progress (rating, bracket, placement state) into a freshly
+ * created account so "Save progress" actually saves it. Only writes when the
+ * profile is brand-new (onboarding not done, zero games) — signing in to an
+ * established account never overwrites real history.
+ */
+export async function migrateGuestToProfile(userId: string): Promise<"migrated" | "skipped" | "error"> {
+  const guest = getGuestSession();
+  if (!guest?.onboardingComplete) return "skipped";
+
+  const { data: profile, error: readError } = await supabase
+    .from("profiles")
+    .select("onboarding_complete, games_played")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (readError || !profile) return "error";
+  if (profile.onboarding_complete || (profile.games_played ?? 0) > 0) {
+    // Established account — keep its data, just drop the guest session.
+    clearGuestSession();
+    return "skipped";
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      rating: guest.rating,
+      onboarding_complete: true,
+      onboarding_elo_bracket: guest.bracket,
+      placement_games_remaining: guest.placementGamesRemaining,
+    })
+    .eq("user_id", userId);
+
+  if (error) return "error";
+  clearGuestSession();
+  return "migrated";
 }
 
 export const BRACKET_RATINGS: Record<string, number> = {

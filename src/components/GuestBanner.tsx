@@ -20,7 +20,7 @@ export function GuestBanner() {
       </p>
       <div className="flex items-center gap-2 shrink-0">
         <Link
-          to="/auth"
+          to="/auth?mode=signup"
           className="inline-flex items-center gap-1.5 bg-primary px-4 py-2 rounded-md font-body text-xs font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-105"
         >
           <UserPlus className="h-3.5 w-3.5" />
