@@ -1,0 +1,5 @@
+Kosal chess piece set
+Author: philatype
+License: MIT
+Source: https://github.com/philatype/kosal
+(distributed via https://github.com/lichess-org/lila/tree/master/public/piece/kosal)

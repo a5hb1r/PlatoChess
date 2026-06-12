@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { BoardThemeId } from "@/lib/chess-themes";
+import { pieceUrl, type PieceSetId } from "@/lib/chess-constants";
 import { COUNTRIES, countryFlag, countryName } from "@/lib/countries";
 
 const PREMOVE_STORAGE_KEY = "plato:premove-enabled";
@@ -48,6 +49,9 @@ const Settings = () => {
     boardTheme,
     setBoardTheme,
     boardThemes,
+    pieceSet,
+    setPieceSet,
+    pieceSets,
     soundEnabled,
     setSoundEnabled,
     showValidMoves,
@@ -567,6 +571,44 @@ const Settings = () => {
                           <span className="h-full w-1/2" style={{ background: `hsl(${theme.chessDark})` }} />
                         </span>
                         <span className="truncate font-body text-sm text-foreground">{theme.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="font-body text-sm font-semibold text-foreground mb-1">Chess Pieces</p>
+                <p className="font-body text-xs text-muted-foreground mb-3">
+                  Pick the piece style used on every board.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(Object.keys(pieceSets) as PieceSetId[]).map((id) => {
+                    const set = pieceSets[id];
+                    const active = pieceSet === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setPieceSet(id)}
+                        className={`flex items-center gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
+                          active
+                            ? "border-primary/60 bg-secondary"
+                            : "border-border hover:bg-secondary/60"
+                        }`}
+                      >
+                        <span className="flex shrink-0 items-center -space-x-1.5 rounded-sm bg-[#739552] p-1">
+                          <img src={pieceUrl(id, "w", "n")} alt="" className="h-8 w-8" draggable={false} />
+                          <img src={pieceUrl(id, "b", "q")} alt="" className="h-8 w-8" draggable={false} />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate font-body text-sm font-semibold text-foreground">
+                            {set.label}
+                          </span>
+                          <span className="block truncate font-body text-[11px] text-muted-foreground">
+                            {set.description}
+                          </span>
+                        </span>
                       </button>
                     );
                   })}

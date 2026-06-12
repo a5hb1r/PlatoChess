@@ -14,6 +14,14 @@ import {
   DEFAULT_BOARD_THEME,
   isBoardThemeId,
 } from "@/lib/chess-themes";
+import {
+  applyPieceSet,
+  getStoredPieceSet,
+  PIECE_SETS,
+  PIECE_SET_STORAGE_KEY,
+  isPieceSetId,
+  type PieceSetId,
+} from "@/lib/chess-constants";
 import { areSoundsEnabled, setSoundsEnabled, SOUND_STORAGE_KEY } from "@/lib/sounds";
 
 const STORAGE_KEY = "platochess-board-theme";
@@ -23,6 +31,9 @@ type ThemeContextValue = {
   boardTheme: BoardThemeId;
   setBoardTheme: (id: BoardThemeId) => void;
   boardThemes: typeof BOARD_THEMES;
+  pieceSet: PieceSetId;
+  setPieceSet: (id: PieceSetId) => void;
+  pieceSets: typeof PIECE_SETS;
   soundEnabled: boolean;
   setSoundEnabled: (enabled: boolean) => void;
   showValidMoves: boolean;
@@ -52,6 +63,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return DEFAULT_BOARD_THEME;
   });
 
+  const [pieceSet, setPieceSetState] = useState<PieceSetId>(() => getStoredPieceSet());
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(() => areSoundsEnabled());
   const [showValidMoves, setShowValidMovesState] = useState<boolean>(() =>
     readBool(VALID_MOVES_STORAGE_KEY, true)
@@ -59,6 +71,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setBoardTheme = useCallback((id: BoardThemeId) => {
     setBoardThemeState(id);
+  }, []);
+
+  const setPieceSet = useCallback((id: PieceSetId) => {
+    setPieceSetState(id);
   }, []);
 
   const setSoundEnabled = useCallback((enabled: boolean) => {
@@ -84,6 +100,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, [boardTheme]);
 
+  // Swap the live PIECE_URLS map before paint so boards render the chosen set.
+  useLayoutEffect(() => {
+    applyPieceSet(pieceSet);
+  }, [pieceSet]);
+
   // Keep the audio module in sync (covers first mount + storage edits in other tabs).
   useEffect(() => {
     setSoundsEnabled(soundEnabled);
@@ -95,6 +116,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         setSoundEnabledState(event.newValue !== "false");
       } else if (event.key === VALID_MOVES_STORAGE_KEY) {
         setShowValidMovesState(event.newValue !== "false");
+      } else if (event.key === PIECE_SET_STORAGE_KEY && event.newValue && isPieceSetId(event.newValue)) {
+        setPieceSetState(event.newValue);
       }
     };
     window.addEventListener("storage", handleStorage);
@@ -106,12 +129,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       boardTheme,
       setBoardTheme,
       boardThemes: BOARD_THEMES,
+      pieceSet,
+      setPieceSet,
+      pieceSets: PIECE_SETS,
       soundEnabled,
       setSoundEnabled,
       showValidMoves,
       setShowValidMoves,
     }),
-    [boardTheme, setBoardTheme, soundEnabled, setSoundEnabled, showValidMoves, setShowValidMoves]
+    [boardTheme, setBoardTheme, pieceSet, setPieceSet, soundEnabled, setSoundEnabled, showValidMoves, setShowValidMoves]
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
