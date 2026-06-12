@@ -56,7 +56,13 @@ export function AppLayout({ children }: AppLayoutProps) {
   return (
     <div className="flex min-h-screen bg-background">
       {/* ── Left Sidebar ────────────────────────────────────────────── */}
-      <aside className="fixed inset-y-0 left-0 z-40 flex flex-col w-14 lg:w-48 bg-[hsl(222,47%,8%)] border-r border-border/40">
+      <aside
+        className="fixed inset-y-0 left-0 z-40 flex flex-col w-14 lg:w-48 border-r border-border/40 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.6)]"
+        style={{
+          background:
+            "linear-gradient(180deg, hsl(222 47% 9.5%), hsl(222 47% 7%) 55%, hsl(222 47% 8%))",
+        }}
+      >
 
         {/* Logo */}
         <div className="flex h-14 items-center justify-center lg:justify-start lg:px-4 border-b border-border/30 shrink-0">
@@ -76,13 +82,21 @@ export function AppLayout({ children }: AppLayoutProps) {
                 key={to}
                 to={to}
                 title={label}
-                className={`group flex items-center gap-3 rounded-md px-2 py-2 text-sm font-body transition-colors ${
+                className={`group relative flex items-center gap-3 rounded-md px-2 py-2 text-sm font-body transition-all duration-150 ${
                   active
-                    ? "bg-sidebar-accent text-primary font-semibold"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground"
+                    ? "bg-primary/10 text-primary font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-foreground hover:translate-x-0.5"
                 }`}
               >
-                <Icon className="h-[18px] w-[18px] shrink-0" />
+                {/* Active accent bar */}
+                {active && (
+                  <span className="absolute -left-1.5 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-primary shadow-[0_0_10px_hsl(191_92%_56%/0.7)]" />
+                )}
+                <Icon
+                  className={`h-[18px] w-[18px] shrink-0 transition-transform duration-150 ${
+                    active ? "" : "group-hover:scale-110"
+                  }`}
+                />
                 <span className="hidden lg:block leading-none">{label}</span>
               </Link>
             );

@@ -51,9 +51,12 @@ export const PlayerBanner = memo(function PlayerBanner({
     <div
       className={`flex items-center gap-3 rounded-xl border px-3 py-2 transition-all duration-200 ${
         isActive
-          ? "border-primary/40 bg-secondary/80 shadow-soft"
-          : "border-border/60 bg-card/60"
+          ? "border-primary/40 bg-secondary/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_18px_-6px_hsl(191_92%_56%/0.35)]"
+          : "border-border/60 bg-card/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
       }`}
+      style={{
+        backgroundImage: "linear-gradient(180deg, rgba(255,255,255,0.03), transparent 45%)",
+      }}
     >
       <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-secondary text-muted-foreground">
         {avatar}

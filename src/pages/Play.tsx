@@ -48,8 +48,8 @@ function DecorativeBoard() {
                 left: `${c * 12.5}%`,
                 top: `${r * 12.5}%`,
                 background: light
-                  ? "hsl(var(--ivory) / 1)"
-                  : "hsl(var(--walnut) / 0.9)",
+                  ? "hsl(var(--chess-light))"
+                  : "hsl(var(--chess-dark))",
               }}
             >
               {piece && (
