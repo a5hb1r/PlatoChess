@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Mail, Lock, User, ArrowLeft, Eye, EyeOff, MailCheck, RefreshCw } from "lucide-react";
+import { Mail, Lock, ArrowLeft, Eye, EyeOff, MailCheck, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import logo from "@/assets/platochess-logo.png";
@@ -14,11 +14,9 @@ const Auth = () => {
   const [isLogin, setIsLogin] = useState(() => searchParams.get("mode") !== "signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [magicLoading, setMagicLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   /** Set when an account exists but its email still needs confirming. */
   const [awaitingConfirm, setAwaitingConfirm] = useState<string | null>(null);
@@ -86,7 +84,7 @@ const Auth = () => {
           password,
           options: {
             data: {
-              full_name: displayName.trim(),
+              full_name: normalizedUsername,
               username: normalizedUsername,
             },
             emailRedirectTo: `${window.location.origin}/play`,
@@ -149,49 +147,6 @@ const Auth = () => {
       toast.error(message);
     } finally {
       setResetLoading(false);
-    }
-  };
-
-  const handleEmailMagicLink = async () => {
-    const normalizedEmail = email.trim();
-    if (!normalizedEmail) {
-      toast.error("Enter your email first.");
-      return;
-    }
-
-    setMagicLoading(true);
-    try {
-      const signupMetadata = !isLogin
-        ? {
-            full_name: displayName.trim(),
-            username: normalizeUsername(username),
-          }
-        : undefined;
-
-      if (!isLogin) {
-        const usernameError = validateUsername(signupMetadata?.username ?? "");
-        if (usernameError) {
-          toast.error(usernameError);
-          return;
-        }
-      }
-
-      const { error } = await supabase.auth.signInWithOtp({
-        email: normalizedEmail,
-        options: {
-          shouldCreateUser: true,
-          emailRedirectTo: `${window.location.origin}/play`,
-          data: signupMetadata,
-        },
-      });
-      if (error) throw error;
-
-      toast.success("Magic link sent. Check your inbox.");
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Could not send magic link";
-      toast.error(message);
-    } finally {
-      setMagicLoading(false);
     }
   };
 
@@ -305,34 +260,21 @@ const Auth = () => {
             </div>
           )}
 
-          {/* Email form */}
+          {/* Email form — username · email · password, chess.com style */}
           <form onSubmit={handleEmailAuth} className="space-y-4">
             {!isLogin && (
-              <div className="space-y-4">
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    placeholder="Display name"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="w-full rounded-md border border-border bg-background pl-10 pr-4 py-3 font-body text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground/35 focus:outline-none focus:ring-1 focus:ring-foreground/25"
-                    required
-                  />
-                </div>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-body text-sm text-muted-foreground">@</span>
-                  <input
-                    type="text"
-                    placeholder="Username (unique handle)"
-                    value={username}
-                    onChange={(e) => setUsername(normalizeUsername(e.target.value))}
-                    className="w-full rounded-md border border-border bg-background pl-8 pr-4 py-3 font-body text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground/35 focus:outline-none focus:ring-1 focus:ring-foreground/25"
-                    minLength={3}
-                    maxLength={30}
-                    required
-                  />
-                </div>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 font-body text-sm text-muted-foreground">@</span>
+                <input
+                  type="text"
+                  placeholder="Username"
+                  value={username}
+                  onChange={(e) => setUsername(normalizeUsername(e.target.value))}
+                  className="w-full rounded-md border border-border bg-background pl-8 pr-4 py-3 font-body text-sm text-foreground placeholder:text-muted-foreground focus:border-foreground/35 focus:outline-none focus:ring-1 focus:ring-foreground/25"
+                  minLength={3}
+                  maxLength={30}
+                  required
+                />
               </div>
             )}
             <div className="relative">
@@ -372,14 +314,6 @@ const Auth = () => {
               className="w-full bg-primary py-3 rounded-md font-body text-sm font-semibold text-primary-foreground shadow-gold transition-transform hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100"
             >
               {loading ? "Loading..." : isLogin ? "Sign In" : "Create Account"}
-            </button>
-            <button
-              type="button"
-              onClick={handleEmailMagicLink}
-              disabled={magicLoading}
-              className="w-full border border-border py-3 rounded-md font-body text-sm font-semibold text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
-            >
-              {magicLoading ? "Sending..." : "Send Magic Link"}
             </button>
             {isLogin && (
               <button
