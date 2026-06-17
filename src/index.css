@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Source+Sans+3:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Source+Sans+3:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,62 +6,64 @@
 
 @layer base {
   :root {
-    --background: 222 47% 7%;
-    --foreground: 210 40% 98%;
+    /* Cleaner neutral-dark (less murky navy) with brighter surfaces so content
+       pops — chess.com vibe, kept in the teal brand. */
+    --background: 220 24% 11%;
+    --foreground: 210 36% 98%;
 
-    --card: 222 42% 12%;
-    --card-foreground: 210 36% 96%;
+    --card: 220 20% 16%;
+    --card-foreground: 210 30% 97%;
 
-    --popover: 222 42% 11%;
-    --popover-foreground: 210 36% 96%;
+    --popover: 220 22% 15%;
+    --popover-foreground: 210 30% 97%;
 
-    --primary: 191 92% 56%;
-    --primary-foreground: 222 47% 7%;
+    --primary: 189 94% 56%;
+    --primary-foreground: 220 30% 9%;
 
-    --secondary: 222 33% 17%;
-    --secondary-foreground: 210 28% 90%;
+    --secondary: 220 16% 22%;
+    --secondary-foreground: 210 28% 92%;
 
-    --muted: 222 28% 15%;
-    --muted-foreground: 215 16% 68%;
+    --muted: 220 16% 20%;
+    --muted-foreground: 215 14% 72%;
 
-    --accent: 164 68% 32%;
+    --accent: 158 64% 42%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 70% 50%;
+    --destructive: 0 72% 52%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 220 24% 22%;
-    --input: 220 24% 24%;
-    --ring: 191 92% 56%;
+    --border: 220 15% 26%;
+    --input: 220 15% 28%;
+    --ring: 189 94% 56%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 222 47% 8%;
-    --sidebar-foreground: 210 32% 86%;
-    --sidebar-primary: 191 92% 56%;
-    --sidebar-primary-foreground: 222 47% 7%;
-    --sidebar-accent: 222 33% 17%;
-    --sidebar-accent-foreground: 210 32% 86%;
-    --sidebar-border: 220 24% 26%;
-    --sidebar-ring: 191 92% 56%;
+    --sidebar-background: 220 24% 13%;
+    --sidebar-foreground: 210 30% 88%;
+    --sidebar-primary: 189 94% 56%;
+    --sidebar-primary-foreground: 220 30% 9%;
+    --sidebar-accent: 220 16% 22%;
+    --sidebar-accent-foreground: 210 32% 90%;
+    --sidebar-border: 220 15% 24%;
+    --sidebar-ring: 189 94% 56%;
 
     /* Monochrome + board (overridable via ThemeContext / data-board-theme) */
     --ivory: 214 44% 94%;
     --walnut: 222 47% 7%;
-    --gold: 191 92% 56%;
-    --gold-glow: 191 88% 66%;
-    --warm-gray: 222 34% 16%;
+    --gold: 189 94% 56%;
+    --gold-glow: 189 90% 66%;
+    --warm-gray: 220 18% 20%;
     --chess-light: 62 42% 87%;
     --chess-dark: 90 29% 45%;
 
-    --font-display: 'Playfair Display', serif;
+    --font-display: 'Montserrat', sans-serif;
     --font-body: 'Source Sans 3', sans-serif;
 
-    --gradient-gold: linear-gradient(135deg, hsl(191 92% 56%), hsl(164 68% 43%));
-    --gradient-brand: linear-gradient(135deg, hsl(191 92% 68%), hsl(164 68% 52%));
-    --gradient-dark: linear-gradient(180deg, hsl(222 47% 9%), hsl(222 47% 6%));
-    --shadow-gold: 0 8px 24px -10px hsl(191 92% 56% / 0.6);
-    --shadow-elevated: 0 14px 40px -14px hsl(222 55% 2% / 0.72);
+    --gradient-gold: linear-gradient(135deg, hsl(189 94% 58%), hsl(158 64% 48%));
+    --gradient-brand: linear-gradient(135deg, hsl(186 96% 64%), hsl(158 70% 52%));
+    --gradient-dark: linear-gradient(180deg, hsl(220 24% 13%), hsl(220 24% 10%));
+    --shadow-gold: 0 6px 18px -8px hsl(189 94% 56% / 0.5);
+    --shadow-elevated: 0 10px 30px -14px hsl(220 40% 3% / 0.6);
   }
 }
 
@@ -73,21 +75,21 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-body);
-    /* Layered ambient lighting: brand glow up top, deep accent low, fixed so it
-       reads as the room's light rather than page decoration. */
+    /* Clean, near-flat dark with one soft brand glow up top — simpler. */
     background-image:
-      radial-gradient(1200px 600px at 50% -8%, hsl(191 92% 56% / 0.09), transparent 60%),
-      radial-gradient(900px 500px at 100% 110%, hsl(164 68% 32% / 0.07), transparent 55%),
-      linear-gradient(180deg, hsl(222 47% 8%), hsl(222 47% 6%));
+      radial-gradient(1100px 520px at 50% -10%, hsl(189 94% 56% / 0.07), transparent 62%),
+      linear-gradient(180deg, hsl(220 24% 12%), hsl(220 24% 10%));
     background-attachment: fixed;
   }
 
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.01em;
   }
 
   ::selection {
-    background: hsl(191 92% 56% / 0.32);
+    background: hsl(189 94% 56% / 0.3);
     color: hsl(210 40% 98%);
   }
 
@@ -115,28 +117,23 @@
 
 @layer components {
   /*
-   * Premium surface treatment — applies automatically to every card-style
-   * panel in the app (the `border` + `bg-card` pairing): a hairline top
-   * highlight, a faint vertical sheen, and soft ambient depth.
+   * Clean flat surfaces — chess.com-style: every card panel is a solid block
+   * with just a crisp border and a whisper of shadow for separation. No
+   * sheen, no gradients.
    */
   .bg-card.border:not(.rounded-full) {
-    background-image: linear-gradient(180deg, hsl(0 0% 100% / 0.035), transparent 32%);
-    box-shadow:
-      inset 0 1px 0 hsl(0 0% 100% / 0.055),
-      0 12px 32px -18px hsl(222 60% 2% / 0.85);
+    box-shadow: 0 1px 2px hsl(220 40% 3% / 0.3);
   }
 
-  /* Interactive cards lift on hover — buttons and links only. */
+  /* Interactive cards (buttons/links) brighten and lift slightly on hover. */
   button.bg-card.border:not(.rounded-full),
   a.bg-card.border:not(.rounded-full) {
-    transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+    transition: transform 120ms ease, border-color 120ms ease, background-color 120ms ease;
   }
   button.bg-card.border:not(.rounded-full):hover,
   a.bg-card.border:not(.rounded-full):hover {
     transform: translateY(-1px);
-    box-shadow:
-      inset 0 1px 0 hsl(0 0% 100% / 0.07),
-      0 16px 36px -18px hsl(222 60% 2% / 0.9);
+    border-color: hsl(189 80% 45% / 0.5);
   }
   button.bg-card.border:not(.rounded-full):active,
   a.bg-card.border:not(.rounded-full):active {
@@ -247,36 +244,36 @@
   .btn-chess-primary {
     background: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
-    box-shadow: 0 4px 0 0 hsl(191 92% 32%);
+    box-shadow: 0 4px 0 0 hsl(189 94% 34%);
   }
   .btn-chess-primary:active {
-    box-shadow: 0 1px 0 0 hsl(191 92% 32%);
+    box-shadow: 0 1px 0 0 hsl(189 94% 34%);
   }
   .btn-chess-primary:hover:not(:active) {
-    background: hsl(191 92% 63%);
+    background: hsl(186 96% 64%);
   }
 
   /* Secondary — subtle card surface */
   .btn-chess-secondary {
     background: hsl(var(--secondary));
     color: hsl(var(--foreground));
-    box-shadow: 0 4px 0 0 hsl(222 33% 10%);
+    box-shadow: 0 4px 0 0 hsl(220 16% 11%);
   }
   .btn-chess-secondary:active {
-    box-shadow: 0 1px 0 0 hsl(222 33% 10%);
+    box-shadow: 0 1px 0 0 hsl(220 16% 11%);
   }
   .btn-chess-secondary:hover:not(:active) {
-    background: hsl(222 33% 20%);
+    background: hsl(220 16% 26%);
   }
 
   /* Danger — red for resign / destructive */
   .btn-chess-danger {
     background: hsl(var(--destructive));
     color: hsl(var(--destructive-foreground));
-    box-shadow: 0 4px 0 0 hsl(0 70% 32%);
+    box-shadow: 0 4px 0 0 hsl(0 72% 34%);
   }
   .btn-chess-danger:active {
-    box-shadow: 0 1px 0 0 hsl(0 70% 32%);
+    box-shadow: 0 1px 0 0 hsl(0 72% 34%);
   }
 
   /* Outline variant (no fill, just a border + ledge) */
@@ -284,11 +281,11 @@
     background: transparent;
     color: hsl(var(--foreground));
     border: 1.5px solid hsl(var(--border));
-    box-shadow: 0 3px 0 0 hsl(220 24% 14%);
+    box-shadow: 0 3px 0 0 hsl(220 15% 16%);
     padding: calc(0.625rem - 1.5px) calc(1.5rem - 1.5px);
   }
   .btn-chess-outline:active {
-    box-shadow: 0 1px 0 0 hsl(220 24% 14%);
+    box-shadow: 0 1px 0 0 hsl(220 15% 16%);
   }
   .btn-chess-outline:hover:not(:active) {
     background: hsl(var(--secondary));
