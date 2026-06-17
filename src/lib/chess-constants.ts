@@ -6,13 +6,14 @@
  * every board (they all read it at render time) shows the user's chosen set.
  */
 
-export type PieceSetId = "chessnut" | "cburnett" | "merida" | "kosal";
+export type PieceSetId = "chessnut" | "cburnett" | "merida" | "kosal" | "skak";
 
 export const PIECE_SETS: Record<PieceSetId, { label: string; description: string }> = {
   chessnut: { label: "Chessnut", description: "Bold and modern — the default" },
   cburnett: { label: "Classic", description: "The familiar standard seen everywhere" },
   merida: { label: "Merida", description: "Elegant traditional engraving" },
   kosal: { label: "Kosal", description: "Clean minimalist lines" },
+  skak: { label: "Skak", description: "Classic LaTeX book style" },
 };
 
 export const DEFAULT_PIECE_SET: PieceSetId = "chessnut";

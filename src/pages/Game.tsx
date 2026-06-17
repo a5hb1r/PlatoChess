@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
@@ -398,6 +398,10 @@ const Game = () => {
   const boardRef = useRef<HTMLDivElement>(null);
   const gameOverActionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const lastEvalUiUpdateRef = useRef(0);
+  // Pending piece-slide animation (chess.com-style). Set by non-drag moves
+  // (click, engine, premove); consumed once by the layout effect below. Drag
+  // moves leave this null because the piece already moved under the pointer.
+  const pendingSlideRef = useRef<{ from: Square; to: Square } | null>(null);
   // Stable ID for this game session — used to correlate the history entry when
   // accuracy data is added later during the review step.
   const gameHistoryIdRef = useRef<string>(`game-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -636,6 +640,7 @@ const Game = () => {
       if (result) {
         playMoveSound(result, g.isCheck());
         applyIncrement("b");
+        pendingSlideRef.current = { from, to }; // slide the engine's reply in
         setGame(g);
         setLastMove({ from, to });
         setHistoryIndex(-1);
@@ -749,7 +754,7 @@ const Game = () => {
   }, [game]);
 
   const executeMove = useCallback(
-    (from: Square, to: Square, promotion?: string) => {
+    (from: Square, to: Square, promotion?: string, animate = true) => {
       const mover = game.turn();
       const g = new Chess(game.fen());
       const result = g.move({ from, to, promotion: (promotion || undefined) as PieceSymbol | undefined });
@@ -757,6 +762,9 @@ const Game = () => {
       if (result) {
         playMoveSound(result, g.isCheck());
         applyIncrement(mover);
+        // Drag moves already travelled under the pointer — only click/engine
+        // moves get the slide animation.
+        if (animate) pendingSlideRef.current = { from, to };
         setMoveHistory((prev) => [...prev, { san: result.san }]);
         setGame(g);
         setLastMove({ from, to });
@@ -772,6 +780,49 @@ const Game = () => {
     },
     [coach, eval_, evalMate, game, applyIncrement],
   );
+
+  // chess.com-style slide: after a non-drag move lands, start the moved piece
+  // at its origin square and transition it home. Runs before paint so there's
+  // no flash of the piece at its destination.
+  useLayoutEffect(() => {
+    const slide = pendingSlideRef.current;
+    pendingSlideRef.current = null;
+    if (!slide || !boardRef.current || viewFen) return;
+
+    const board = boardRef.current;
+    const node = board.querySelector<HTMLElement>(`[data-square="${slide.to}"] img`);
+    if (!node) return;
+
+    const squarePx = board.getBoundingClientRect().width / 8;
+    const visual = (sq: Square) => {
+      let col = sq.charCodeAt(0) - 97;
+      let row = 8 - Number(sq[1]);
+      if (boardFlipped) {
+        col = 7 - col;
+        row = 7 - row;
+      }
+      return { col, row };
+    };
+    const f = visual(slide.from);
+    const t = visual(slide.to);
+    const dx = (f.col - t.col) * squarePx;
+    const dy = (f.row - t.row) * squarePx;
+    if (dx === 0 && dy === 0) return;
+
+    node.style.transition = "none";
+    node.style.transform = `translate(${dx}px, ${dy}px)`;
+    node.getBoundingClientRect(); // force reflow so the starting offset commits
+    requestAnimationFrame(() => {
+      node.style.transition = "transform 0.18s cubic-bezier(0.22, 1, 0.36, 1)";
+      node.style.transform = "translate(0px, 0px)";
+      const clear = () => {
+        node.style.transition = "";
+        node.style.transform = "";
+        node.removeEventListener("transitionend", clear);
+      };
+      node.addEventListener("transitionend", clear);
+    });
+  }, [moveHistory.length, viewFen, boardFlipped]);
 
   useEffect(() => {
     if (!queuedPremove || !isEngineOpponent || game.turn() !== "w" || engineThinking || gameOver || !premoveEnabled) return;
@@ -943,7 +994,7 @@ const Game = () => {
         ) {
           setPromotionSquare({ from: dragging.square, to: targetSquare });
         } else {
-          executeMove(dragging.square, targetSquare);
+          executeMove(dragging.square, targetSquare, undefined, false); // no slide: already dragged
         }
       } else {
         ChessSounds.illegal();
@@ -1410,6 +1461,7 @@ const Game = () => {
                       return (
                         <div
                           key={square}
+                          data-square={square}
                           onClick={() => handleSquareClick(square)}
                           onMouseDown={(e) => {
                             if (e.button === 2) {

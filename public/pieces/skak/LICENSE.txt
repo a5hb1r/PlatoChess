@@ -1,0 +1,5 @@
+Skak chess piece set
+Originally designed by Piet Tutelaers, modified by Torben Hoffmann.
+Extracted from the skak LaTeX package (LaTeX Project Public License / freely
+redistributable) and converted to SVG by MuTsunTsai.
+Source: https://github.com/MuTsunTsai/skak-svg
