@@ -19,8 +19,6 @@ import {
   FlipVertical2,
   Download,
   Copy,
-  Volume2,
-  VolumeX,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Chess, Square, PieceSymbol, Color } from "chess.js";
@@ -70,13 +68,6 @@ import {
   pickTaunt,
   type BotPersonality,
 } from "@/lib/bot-personalities";
-import {
-  getVoiceEnabled,
-  isVoiceSupported,
-  setVoiceEnabled as persistVoiceEnabled,
-  speakAsPhilosopher,
-  stopSpeaking,
-} from "@/lib/philosopher-voice";
 import { PhilosopherAvatar } from "@/components/chess/PhilosopherAvatar";
 import { BoardArrows, type BoardArrow } from "@/components/chess/BoardArrows";
 import { supabase } from "@/integrations/supabase/client";
@@ -232,26 +223,6 @@ const Game = () => {
   const [botMessages, setBotMessages] = useState<BotMsg[]>([]);
   const prevEvalRef = useRef<number>(0);
   const botMessageEndRef = useRef<HTMLDivElement>(null);
-
-  // Philosopher voice (Web Speech) + talking-avatar state
-  const [voiceOn, setVoiceOn] = useState<boolean>(() => getVoiceEnabled());
-  const [botSpeaking, setBotSpeaking] = useState(false);
-  const voiceOnRef = useRef(voiceOn);
-  voiceOnRef.current = voiceOn;
-  const namedBotIdRef = useRef<string | null>(namedBot?.id ?? null);
-  namedBotIdRef.current = namedBot?.id ?? null;
-
-  const toggleVoice = useCallback(() => {
-    setVoiceOn((prev) => {
-      const next = !prev;
-      persistVoiceEnabled(next);
-      if (!next) setBotSpeaking(false);
-      return next;
-    });
-  }, []);
-
-  // Silence the philosopher when leaving the page.
-  useEffect(() => () => stopSpeaking(), []);
 
   // Time control (minutes + Fischer increment seconds, defaults to 10|0).
   const initialMinutes = Number(searchParams.get("min")) || 10;
@@ -672,13 +643,6 @@ const Game = () => {
   const addBotMsg = useCallback((text: string, isBot = true) => {
     if (!text) return;
     setBotMessages((prev) => [...prev, { id: Date.now() + Math.random(), text, isBot }]);
-    // Speak the line aloud in the philosopher's voice.
-    if (isBot && voiceOnRef.current && namedBotIdRef.current) {
-      speakAsPhilosopher(namedBotIdRef.current, text, {
-        onStart: () => setBotSpeaking(true),
-        onEnd: () => setBotSpeaking(false),
-      });
-    }
   }, []);
 
   // Greeting when game starts
@@ -2036,7 +2000,7 @@ const Game = () => {
                   {namedBot && (
                     <PhilosopherAvatar
                       botId={namedBot.id}
-                      speaking={botSpeaking}
+                      speaking={false}
                       size={40}
                       className="shrink-0 -my-1"
                     />
@@ -2046,27 +2010,15 @@ const Game = () => {
                       {botPersonality.displayName}
                     </p>
                     <p className="font-body text-[10px] text-muted-foreground mt-0.5 truncate">
-                      {botSpeaking ? "Speaking…" : botPersonality.tagline}
+                      {botPersonality.tagline}
                     </p>
                   </div>
                   <span className="ml-auto font-mono text-[10px] text-muted-foreground shrink-0">
                     {namedBot?.ratingLabel}
                   </span>
-                  {isVoiceSupported() && (
-                    <button
-                      type="button"
-                      onClick={toggleVoice}
-                      title={voiceOn ? "Mute philosopher voice" : "Unmute philosopher voice"}
-                      aria-label={voiceOn ? "Mute philosopher voice" : "Unmute philosopher voice"}
-                      className={`shrink-0 rounded-md border p-1.5 transition-colors ${
-                        voiceOn
-                          ? "border-primary/50 bg-primary/10 text-primary"
-                          : "border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {voiceOn ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
-                    </button>
-                  )}
+                  <span className="shrink-0 rounded-full border border-border px-2 py-0.5 font-body text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Voice Soon
+                  </span>
                 </div>
 
                 {/* Messages */}
