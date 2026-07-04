@@ -1,0 +1,3 @@
+Original piece set created for PlatoChess (July 2026).
+Drawn from scratch as SVG vectors; no third-party artwork.
+All rights reserved by the PlatoChess site owner.

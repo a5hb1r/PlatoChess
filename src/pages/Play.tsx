@@ -17,26 +17,26 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { AppLayout } from "@/components/AppLayout";
+import { GuestOnboarding } from "@/components/GuestOnboarding";
 import { Slider } from "@/components/ui/slider";
+import { PIECE_URLS } from "@/lib/chess-constants";
 
 // ── Static decorative board ───────────────────────────────────────────────────
-// Renders a 8×8 CSS grid as visual chrome (no chess logic needed).
+// Renders a 8×8 CSS grid as visual chrome using the user's chosen piece set.
 function DecorativeBoard() {
-  const START_FEN_SYMBOLS: (string | null)[][] = [
-    ["♜","♞","♝","♛","♚","♝","♞","♜"],
-    ["♟","♟","♟","♟","♟","♟","♟","♟"],
-    [null,null,null,null,null,null,null,null],
-    [null,null,null,null,null,null,null,null],
-    [null,null,null,null,null,null,null,null],
-    [null,null,null,null,null,null,null,null],
-    ["♙","♙","♙","♙","♙","♙","♙","♙"],
-    ["♖","♘","♗","♕","♔","♗","♘","♖"],
+  const BACK = ["r", "n", "b", "q", "k", "b", "n", "r"];
+  const START_CELLS: ({ c: "w" | "b"; t: string } | null)[][] = [
+    BACK.map((t) => ({ c: "b" as const, t })),
+    BACK.map(() => ({ c: "b" as const, t: "p" })),
+    ...Array.from({ length: 4 }, () => Array<null>(8).fill(null)),
+    BACK.map(() => ({ c: "w" as const, t: "p" })),
+    BACK.map((t) => ({ c: "w" as const, t })),
   ];
 
   return (
     <div className="relative w-full max-w-[400px] aspect-square rounded-xl overflow-hidden border border-border/50 shadow-xl">
-      {START_FEN_SYMBOLS.map((row, r) =>
-        row.map((piece, c) => {
+      {START_CELLS.map((row, r) =>
+        row.map((cell, c) => {
           const light = (r + c) % 2 === 0;
           return (
             <div
@@ -52,17 +52,14 @@ function DecorativeBoard() {
                   : "hsl(var(--chess-dark))",
               }}
             >
-              {piece && (
-                <span
-                  className="select-none"
-                  style={{
-                    fontSize: "clamp(14px, 3.5vw, 28px)",
-                    lineHeight: 1,
-                    filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.5))",
-                  }}
-                >
-                  {piece}
-                </span>
+              {cell && (
+                <img
+                  src={PIECE_URLS[cell.c][cell.t]}
+                  alt=""
+                  draggable={false}
+                  className="h-[88%] w-[88%] select-none"
+                  style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.4))" }}
+                />
               )}
             </div>
           );
@@ -258,6 +255,8 @@ const Play = () => {
 
   return (
     <AppLayout>
+      {/* First-visit skill calibration — asked here, where the rating is used */}
+      <GuestOnboarding />
       <div className="min-h-screen bg-background">
         {/* Casual ELO picker modal */}
         {casualOpen && <CasualEloModal onClose={() => setCasualOpen(false)} />}

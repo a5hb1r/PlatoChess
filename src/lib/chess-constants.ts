@@ -6,10 +6,21 @@
  * every board (they all read it at render time) shows the user's chosen set.
  */
 
-export type PieceSetId = "chessnut" | "cburnett" | "merida" | "kosal" | "skak";
+export type PieceSetId =
+  | "chessnut"
+  | "cburnett"
+  | "merida"
+  | "kosal"
+  | "skak"
+  | "flat"
+  | "synthwave"
+  | "imperial";
 
 export const PIECE_SETS: Record<PieceSetId, { label: string; description: string }> = {
   chessnut: { label: "Chessnut", description: "Bold and modern — the default" },
+  flat: { label: "Modern Flat", description: "Crisp minimal vectors, premium finish" },
+  synthwave: { label: "Synthwave", description: "Neon turquoise vs. magenta glow" },
+  imperial: { label: "Imperial", description: "Luxury gold and obsidian" },
   cburnett: { label: "Classic", description: "The familiar standard seen everywhere" },
   merida: { label: "Merida", description: "Elegant traditional engraving" },
   kosal: { label: "Kosal", description: "Clean minimalist lines" },

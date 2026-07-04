@@ -147,13 +147,24 @@ export function GuestOnboarding() {
               })}
             </div>
 
-            <p className="text-center font-body text-xs text-muted-foreground mt-6">
-              No account needed to start.{" "}
-              <Link to="/auth?mode=signup" className="underline hover:text-foreground">
-                Sign up
-              </Link>{" "}
-              anytime to save your progress permanently.
-            </p>
+            <div className="text-center mt-6 space-y-3">
+              <button
+                type="button"
+                onClick={() =>
+                  handleSelect(BRACKETS[1] /* sensible middle default */)
+                }
+                className="font-body text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground transition-colors"
+              >
+                Not sure? Skip for now
+              </button>
+              <p className="font-body text-xs text-muted-foreground">
+                No account needed to start.{" "}
+                <Link to="/auth?mode=signup" className="underline hover:text-foreground">
+                  Sign up
+                </Link>{" "}
+                anytime to save your progress permanently.
+              </p>
+            </div>
           </motion.div>
         </motion.div>
       )}
