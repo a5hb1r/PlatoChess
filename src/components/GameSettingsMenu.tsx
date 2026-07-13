@@ -1,8 +1,18 @@
-import { Check, Settings2, Volume2, VolumeX } from "lucide-react";
+import { useState } from "react";
+import { Check, Lock, LockOpen, Settings2, Volume2, VolumeX } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { useTheme } from "@/contexts/ThemeContext";
 import type { BoardThemeId } from "@/lib/chess-themes";
+import {
+  BOARD_SIZE_MAX,
+  BOARD_SIZE_MIN,
+  getBoardSize,
+  getBoardSizeLocked,
+  setBoardSize,
+  setBoardSizeLocked,
+} from "@/lib/board-size";
 
 /**
  * Quick-access game settings popover (chess.com-style gear menu).
@@ -19,6 +29,19 @@ export function GameSettingsMenu({ className = "" }: { className?: string }) {
     showValidMoves,
     setShowValidMoves,
   } = useTheme();
+
+  const [sizePct, setSizePct] = useState<number>(() => getBoardSize());
+  const [sizeLocked, setSizeLocked] = useState<boolean>(() => getBoardSizeLocked());
+
+  const handleSize = (v: number[]) => {
+    if (sizeLocked) return;
+    setSizePct(v[0]);
+    setBoardSize(v[0]); // broadcasts — the board resizes live
+  };
+  const handleLock = (locked: boolean) => {
+    setSizeLocked(locked);
+    setBoardSizeLocked(locked);
+  };
 
   return (
     <Popover>
@@ -75,6 +98,40 @@ export function GameSettingsMenu({ className = "" }: { className?: string }) {
               );
             })}
           </div>
+        </div>
+
+        <div className="h-px bg-border" />
+
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="font-body text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Board size · {sizePct}%
+            </p>
+            <button
+              type="button"
+              onClick={() => handleLock(!sizeLocked)}
+              title={sizeLocked ? "Unlock board size" : "Lock board size"}
+              aria-label={sizeLocked ? "Unlock board size" : "Lock board size"}
+              className={`flex items-center gap-1 rounded-md border px-2 py-1 font-body text-[10px] font-semibold transition-colors ${
+                sizeLocked
+                  ? "border-primary/50 bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {sizeLocked ? <Lock className="h-3 w-3" /> : <LockOpen className="h-3 w-3" />}
+              {sizeLocked ? "Locked" : "Lock"}
+            </button>
+          </div>
+          <Slider
+            value={[sizePct]}
+            min={BOARD_SIZE_MIN}
+            max={BOARD_SIZE_MAX}
+            step={5}
+            disabled={sizeLocked}
+            onValueChange={handleSize}
+            aria-label="Board size"
+            className={sizeLocked ? "opacity-50" : ""}
+          />
         </div>
 
         <div className="h-px bg-border" />

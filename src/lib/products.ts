@@ -65,7 +65,7 @@ export const PRODUCTS: Product[] = [
       'GM-curated puzzle sets',
       'Advanced weakness detection',
       'Priority game reviews',
-      '1-on-1 coaching matchmaking',
+      'Priority matchmaking',
     ],
     cta: 'Go Master',
     highlighted: false,

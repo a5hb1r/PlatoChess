@@ -42,7 +42,7 @@ const PLANS = [
       "Unlimited puzzles",
       "6 bots (up to ~1650 ELO)",
       "Full post-game analysis",
-      "Move ratings + AI coach",
+      "Move quality ratings",
       "Personalized puzzles",
     ],
     cta: "Subscribe to Pro",
@@ -169,7 +169,7 @@ const Pricing = () => {
             Invest in your <span className="text-gradient-brand italic">chess</span>
           </h1>
           <p className="font-body text-muted-foreground max-w-md mx-auto">
-            Start free. Upgrade when you want deeper analysis and coaching.
+            Start free — philosopher coaches included. Upgrade for deeper analysis.
           </p>
         </motion.div>
 

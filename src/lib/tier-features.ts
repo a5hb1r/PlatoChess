@@ -14,7 +14,7 @@ export const TIER_FEATURES = {
     puzzlesPerDay: 10,
     analysis: false,
     moveRatings: false,
-    aiCoach: false,
+    aiCoach: true,
     personalizedPuzzles: false,
     /** Which bot IDs are accessible */
     bots: ["chiron", "socrates", "aristotle"],
@@ -112,7 +112,7 @@ export const PRICING_FEATURES: FeatureItem[] = [
   { label: "Play vs bots", free: "3 bots", pro: "6 bots", master: "All 8 bots" },
   { label: "Post-game analysis", free: false, pro: true, master: true },
   { label: "Move quality ratings", free: false, pro: true, master: true },
-  { label: "AI coach hints", free: false, pro: true, master: true },
+  { label: "Philosopher coaches", free: true, pro: true, master: true },
   { label: "Personalized puzzles", free: false, pro: true, master: true },
   { label: "Analysis depth", free: false, pro: "Standard (depth 10)", master: "Deep (depth 15)" },
   { label: "Human vs human", free: true, pro: true, master: true },

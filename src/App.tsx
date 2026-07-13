@@ -9,6 +9,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { GuestBanner } from "@/components/GuestBanner";
 import { AppLayout } from "@/components/AppLayout";
+import { PageLoader } from "@/components/PageLoader";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index.tsx";
 const Play = lazy(() => import("./pages/Play.tsx"));
@@ -33,7 +34,7 @@ const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 // the sidebar isn't doubled up.
 const SidebarLayout = () => (
   <AppLayout>
-    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+    <Suspense fallback={<PageLoader />}>
       <Outlet />
     </Suspense>
   </AppLayout>
@@ -59,15 +60,15 @@ const App = () => {
               <Routes>
                 {/* ── Full-page / standalone routes (no sidebar) ── */}
                 <Route path="/" element={<Index />} />
-                <Route path="/auth" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><Auth /></Suspense>} />
-                <Route path="/game" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><Game /></Suspense>} />
-                <Route path="/analyze-game" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><AnalyzeGame /></Suspense>} />
-                <Route path="/privacy" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><Privacy /></Suspense>} />
-                <Route path="/terms" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><Terms /></Suspense>} />
+                <Route path="/auth" element={<Suspense fallback={<PageLoader />}><Auth /></Suspense>} />
+                <Route path="/game" element={<Suspense fallback={<PageLoader />}><Game /></Suspense>} />
+                <Route path="/analyze-game" element={<Suspense fallback={<PageLoader />}><AnalyzeGame /></Suspense>} />
+                <Route path="/privacy" element={<Suspense fallback={<PageLoader />}><Privacy /></Suspense>} />
+                <Route path="/terms" element={<Suspense fallback={<PageLoader />}><Terms /></Suspense>} />
 
                 {/* ── Dashboard & Play embed AppLayout themselves ── */}
-                <Route path="/dashboard" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><Dashboard /></Suspense>} />
-                <Route path="/play" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><Play /></Suspense>} />
+                <Route path="/dashboard" element={<Suspense fallback={<PageLoader />}><Dashboard /></Suspense>} />
+                <Route path="/play" element={<Suspense fallback={<PageLoader />}><Play /></Suspense>} />
 
                 {/* ── Inner pages — sidebar via SidebarLayout ─────── */}
                 <Route element={<SidebarLayout />}>
@@ -82,7 +83,7 @@ const App = () => {
                 </Route>
 
                 {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><NotFound /></Suspense>} />
+                <Route path="*" element={<Suspense fallback={<PageLoader />}><NotFound /></Suspense>} />
               </Routes>
               </ErrorBoundary>
             </AuthProvider>

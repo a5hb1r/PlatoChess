@@ -833,9 +833,11 @@ export default function AnalyzeGame() {
                 setSelectedPly((p) => Math.max(0, p - 1));
                 setPreviewFen(null);
               }}
-              className="p-3 bg-card border border-border rounded-lg hover:bg-secondary"
+              aria-label="Previous move"
+              title="Previous move (←)"
+              className="flex h-14 min-w-[3.5rem] items-center justify-center bg-card border border-border rounded-lg hover:bg-secondary hover:border-primary/50 active:scale-95 transition-all"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-7 h-7" />
             </button>
             <div className="flex-1 bg-card border border-border rounded-lg px-4 py-3 text-sm space-y-1">
               {current ? (
@@ -864,9 +866,11 @@ export default function AnalyzeGame() {
                 setSelectedPly((p) => Math.min(report!.moves.length, p + 1));
                 setPreviewFen(null);
               }}
-              className="p-3 bg-card border border-border rounded-lg hover:bg-secondary"
+              aria-label="Next move"
+              title="Next move (→)"
+              className="flex h-14 min-w-[3.5rem] items-center justify-center bg-card border border-border rounded-lg hover:bg-secondary hover:border-primary/50 active:scale-95 transition-all"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-7 h-7" />
             </button>
           </div>
 

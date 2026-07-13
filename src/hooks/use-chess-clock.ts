@@ -25,6 +25,8 @@ export interface ChessClock {
   setRunning: (running: boolean) => void;
   applyIncrement: (color: Color) => void;
   reset: (initialMs?: number) => void;
+  /** Overwrite both clocks (server-authoritative sync for online games). */
+  syncTimes: (whiteMs: number, blackMs: number) => void;
 }
 
 export function useChessClock({ initialMs, incrementMs }: ChessClockOptions): ChessClock {
@@ -104,7 +106,14 @@ export function useChessClock({ initialMs, incrementMs }: ChessClockOptions): Ch
     [initialMs],
   );
 
-  return { whiteMs, blackMs, flagged, setActive, setRunning, applyIncrement, reset };
+  const syncTimes = useCallback((w: number, b: number) => {
+    lastRef.current = performance.now();
+    setWhiteMs(Math.max(0, w));
+    setBlackMs(Math.max(0, b));
+    if (w > 0 && b > 0) setFlagged(null);
+  }, []);
+
+  return { whiteMs, blackMs, flagged, setActive, setRunning, applyIncrement, reset, syncTimes };
 }
 
 /** Format milliseconds as m:ss, adding tenths under 20s for urgency. */

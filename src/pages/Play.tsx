@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Zap,
   Shuffle,
@@ -20,6 +20,10 @@ import { AppLayout } from "@/components/AppLayout";
 import { GuestOnboarding } from "@/components/GuestOnboarding";
 import { Slider } from "@/components/ui/slider";
 import { PIECE_URLS } from "@/lib/chess-constants";
+import { useAuth } from "@/contexts/AuthContext";
+import { joinMatchmaking, leaveMatchmaking, myActiveGame } from "@/lib/live-game";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
 // ── Static decorative board ───────────────────────────────────────────────────
 // Renders a 8×8 CSS grid as visual chrome using the user's chosen piece set.
@@ -94,6 +98,154 @@ const TIME_CATEGORIES = [
     times: ["10+0","15+10","30+0"],
   },
 ];
+
+// ── Online matchmaking modal ──────────────────────────────────────────────────
+const ONLINE_POOLS = [
+  { label: "3+2", desc: "Blitz", minutes: 3, increment: 2 },
+  { label: "10+0", desc: "Rapid", minutes: 10, increment: 0 },
+  { label: "15+10", desc: "Classical", minutes: 15, increment: 10 },
+];
+
+function OnlineMatchModal({ onClose }: { onClose: () => void }) {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [poolIdx, setPoolIdx] = useState(1);
+  const [searching, setSearching] = useState(false);
+  const searchingRef = useRef(false);
+  const pollRef = useRef<number | null>(null);
+
+  const stopSearch = useCallback(() => {
+    searchingRef.current = false;
+    if (pollRef.current) window.clearInterval(pollRef.current);
+    pollRef.current = null;
+    setSearching(false);
+    leaveMatchmaking().catch(() => {});
+  }, []);
+
+  // Leaving the page while queued removes us from the queue.
+  useEffect(
+    () => () => {
+      if (searchingRef.current) {
+        if (pollRef.current) window.clearInterval(pollRef.current);
+        leaveMatchmaking().catch(() => {});
+      }
+    },
+    []
+  );
+
+  const goToGame = useCallback(
+    (gameId: string) => {
+      const pool = ONLINE_POOLS[poolIdx];
+      navigate(`/game?mode=online&game=${gameId}&min=${pool.minutes}&inc=${pool.increment}`);
+    },
+    [navigate, poolIdx]
+  );
+
+  const startSearch = async () => {
+    if (!user) {
+      toast.message("Create a free account to play rated online chess.");
+      navigate("/auth?mode=signup");
+      return;
+    }
+    const pool = ONLINE_POOLS[poolIdx];
+    setSearching(true);
+    searchingRef.current = true;
+    try {
+      const immediate = await joinMatchmaking(pool.minutes, pool.increment);
+      if (immediate) {
+        searchingRef.current = false;
+        goToGame(immediate);
+        return;
+      }
+      pollRef.current = window.setInterval(async () => {
+        if (!searchingRef.current) return;
+        try {
+          const gid = await myActiveGame();
+          if (gid && searchingRef.current) {
+            searchingRef.current = false;
+            if (pollRef.current) window.clearInterval(pollRef.current);
+            goToGame(gid);
+          }
+        } catch {
+          /* transient — keep polling */
+        }
+      }, 2500);
+    } catch {
+      setSearching(false);
+      searchingRef.current = false;
+      toast.error("Matchmaking is unavailable right now — try again in a moment.");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-panel">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-display text-lg font-bold text-foreground">Play Online</h3>
+          <button
+            type="button"
+            onClick={() => {
+              stopSearch();
+              onClose();
+            }}
+            aria-label="Close"
+            className="rounded-md border border-border p-1.5 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {searching ? (
+          <div className="flex flex-col items-center gap-4 py-6 text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <div>
+              <p className="font-body text-sm font-semibold text-foreground">
+                Searching for an opponent… ({ONLINE_POOLS[poolIdx].label})
+              </p>
+              <p className="mt-1 font-body text-xs text-muted-foreground">
+                You'll be paired the moment someone joins this pool.
+              </p>
+            </div>
+            <button type="button" onClick={stopSearch} className="btn-chess btn-chess-outline w-full py-2.5 text-sm">
+              Cancel search
+            </button>
+          </div>
+        ) : (
+          <>
+            <p className="mb-3 font-body text-xs text-muted-foreground">
+              Rated games against real players. Pick a time control:
+            </p>
+            <div className="mb-5 grid grid-cols-3 gap-2">
+              {ONLINE_POOLS.map((pool, i) => (
+                <button
+                  key={pool.label}
+                  type="button"
+                  onClick={() => setPoolIdx(i)}
+                  className={`rounded-lg border px-2 py-3 text-center transition-colors ${
+                    poolIdx === i
+                      ? "border-primary/60 bg-primary/10 text-primary"
+                      : "border-border bg-card text-foreground hover:bg-secondary/60"
+                  }`}
+                >
+                  <span className="block font-display text-base font-bold">{pool.label}</span>
+                  <span className="block font-body text-[10px] text-muted-foreground">{pool.desc}</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={startSearch} className="btn-chess btn-chess-primary w-full py-3 text-sm">
+              Find a Match
+            </button>
+            {!user && (
+              <p className="mt-3 text-center font-body text-[11px] text-muted-foreground">
+                Requires a free account, so your rating follows you.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── Casual mode ELO picker ────────────────────────────────────────────────────
 const CASUAL_ELO_MIN = 250;
@@ -210,6 +362,7 @@ function CasualEloModal({ onClose }: { onClose: () => void }) {
 const Play = () => {
   const navigate = useNavigate();
   const [casualOpen, setCasualOpen] = useState(false);
+  const [onlineOpen, setOnlineOpen] = useState(false);
 
   const handleTimeControl = (time: string) => {
     const [minutes, increment] = time.split("+").map(Number);
@@ -218,12 +371,19 @@ const Play = () => {
 
   const OPTIONS: PlayOption[] = [
     {
+      icon: Globe,
+      iconBg: "bg-primary",
+      label: "Play Online",
+      description: "Rated matchmaking vs real players",
+      onClick: () => setOnlineOpen(true),
+      highlight: true,
+    },
+    {
       icon: Bot,
       iconBg: "bg-sky-600",
       label: "Play Bots",
       description: "Challenge a philosopher-bot, Easy to Master",
       onClick: () => navigate("/bots"),
-      highlight: true,
     },
     {
       icon: Gauge,
@@ -249,7 +409,6 @@ const Play = () => {
   ];
 
   const COMING_SOON = [
-    { icon: Globe, label: "Play Online", desc: "Matchmaking vs players worldwide" },
     { icon: Shuffle, label: "Chess 960", desc: "Randomised starting position" },
   ];
 
@@ -260,6 +419,8 @@ const Play = () => {
       <div className="min-h-screen bg-background">
         {/* Casual ELO picker modal */}
         {casualOpen && <CasualEloModal onClose={() => setCasualOpen(false)} />}
+        {/* Online matchmaking modal */}
+        {onlineOpen && <OnlineMatchModal onClose={() => setOnlineOpen(false)} />}
 
         {/* ── Page header ─────────────────────────────────────────── */}
         <div className="border-b border-border/40 px-6 lg:px-10 py-4">

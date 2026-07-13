@@ -16,6 +16,7 @@ import {
   Sparkles,
   Trophy,
   Lock,
+  Flag,
   FlipVertical2,
   Download,
   Copy,
@@ -70,6 +71,16 @@ import {
 } from "@/lib/bot-personalities";
 import { PhilosopherAvatar } from "@/components/chess/PhilosopherAvatar";
 import { BoardArrows, type BoardArrow } from "@/components/chess/BoardArrows";
+import { BOARD_SIZE_EVENT, getBoardSize } from "@/lib/board-size";
+import {
+  claimLiveTimeout,
+  describeLiveResult,
+  fetchLiveGame,
+  playLiveMove,
+  resignLiveGame,
+  subscribeToLiveGame,
+  type LiveGameRow,
+} from "@/lib/live-game";
 import { supabase } from "@/integrations/supabase/client";
 import { countryFlag } from "@/lib/countries";
 import { toast } from "sonner";
@@ -195,8 +206,10 @@ const Game = () => {
   const isDailyMode = mode === "daily";
   const isCasualMode = mode === "casual";
   const isFriendMode = mode === "friend";
-  /** Stockfish plays Black in every mode except local pass-and-play. */
-  const isEngineOpponent = !isFriendMode;
+  const isOnlineMode = mode === "online";
+  const onlineGameId = searchParams.get("game");
+  /** Stockfish plays Black in every mode except pass-and-play and online. */
+  const isEngineOpponent = !isFriendMode && !isOnlineMode;
   /** Live eval bar/readout — hidden online and in pass-and-play (it would spoil a human game). */
   const showLiveEval = mode !== "online" && !isFriendMode;
 
@@ -224,11 +237,30 @@ const Game = () => {
   const prevEvalRef = useRef<number>(0);
   const botMessageEndRef = useRef<HTMLDivElement>(null);
 
+  // Player-adjustable board size (set from the in-game Settings menu).
+  const [boardScale, setBoardScale] = useState<number>(() => getBoardSize());
+  useEffect(() => {
+    const onBoardResize = (e: Event) => setBoardScale((e as CustomEvent<number>).detail);
+    window.addEventListener(BOARD_SIZE_EVENT, onBoardResize);
+    return () => window.removeEventListener(BOARD_SIZE_EVENT, onBoardResize);
+  }, []);
+
   // Time control (minutes + Fischer increment seconds, defaults to 10|0).
   const initialMinutes = Number(searchParams.get("min")) || 10;
   const incrementSeconds = Number(searchParams.get("inc")) || 0;
   const clock = useChessClock({ initialMs: initialMinutes * 60000, incrementMs: incrementSeconds * 1000 });
-  const { whiteMs, blackMs, flagged, setActive, setRunning, applyIncrement, reset: resetClock } = clock;
+  const { whiteMs, blackMs, flagged, setActive, setRunning, applyIncrement, reset: resetClock, syncTimes } = clock;
+
+  // ── Online game state (live_games row mirrors the source of truth) ──────
+  const [liveGame, setLiveGame] = useState<LiveGameRow | null>(null);
+  const liveGameRef = useRef<LiveGameRow | null>(null);
+  liveGameRef.current = liveGame;
+  const myOnlineColor: Color = liveGame && user && liveGame.black_id === user.id ? "b" : "w";
+  const oppOnlineColor: Color = myOnlineColor === "w" ? "b" : "w";
+  const onlineOppName = liveGame ? (oppOnlineColor === "w" ? liveGame.white_name : liveGame.black_name) : "Opponent";
+  const onlineOppRating = liveGame ? (oppOnlineColor === "w" ? liveGame.white_rating : liveGame.black_rating) : null;
+  const onlineMyRating = liveGame ? (myOnlineColor === "w" ? liveGame.white_rating : liveGame.black_rating) : null;
+  const onlineMyDelta = liveGame ? (myOnlineColor === "w" ? liveGame.rating_delta_w : liveGame.rating_delta_b) : null;
 
   const [game, setGame] = useState(new Chess());
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
@@ -594,6 +626,115 @@ const Game = () => {
   }, [engineLabel, game, gameOver, difficulty.label, namedBot, user?.id, isFriendMode]);
 
   // Stockfish plays black
+  // ── Online play: mirror the server row into local state ─────────────────
+  // Tracks how many plies of `moves` are already applied locally so our own
+  // move's echo is a no-op and only genuine opponent moves animate.
+  const appliedPliesRef = useRef(0);
+  const onlineEndedRef = useRef(false);
+
+  const syncFromRow = useCallback(
+    (row: LiveGameRow) => {
+      setLiveGame(row);
+
+      const uciList = row.moves ? row.moves.split(" ") : [];
+      if (uciList.length !== appliedPliesRef.current) {
+        const g = new Chess();
+        const sans: { san: string }[] = [];
+        let last: { from: Square; to: Square } | null = null;
+        let lastMv: ReturnType<Chess["move"]> | null = null;
+        for (const uci of uciList) {
+          try {
+            lastMv = g.move({
+              from: uci.slice(0, 2) as Square,
+              to: uci.slice(2, 4) as Square,
+              promotion: (uci[4] || undefined) as PieceSymbol | undefined,
+            });
+          } catch {
+            lastMv = null;
+          }
+          if (!lastMv) break;
+          sans.push({ san: lastMv.san });
+          last = { from: lastMv.from as Square, to: lastMv.to as Square };
+        }
+        const prevPlies = appliedPliesRef.current;
+        appliedPliesRef.current = sans.length;
+        if (last && lastMv && sans.length === prevPlies + 1) {
+          playMoveSound(lastMv, g.isCheck());
+          pendingSlideRef.current = last; // opponent's piece slides in
+        }
+        setGame(g);
+        setMoveHistory(sans);
+        setLastMove(last);
+        setHistoryIndex(-1);
+        setViewFen(null);
+      }
+
+      // Server-authoritative clocks: stored values are as of last_move_at,
+      // so subtract what the side to move has burned since then.
+      const elapsed = Math.max(0, Date.now() - new Date(row.last_move_at).getTime());
+      const w = row.status === "active" && row.turn === "w" ? row.white_ms - elapsed : row.white_ms;
+      const b = row.status === "active" && row.turn === "b" ? row.black_ms - elapsed : row.black_ms;
+      syncTimes(w, b);
+
+      if (row.status !== "active" && user && !onlineEndedRef.current) {
+        onlineEndedRef.current = true;
+        const myC = row.black_id === user.id ? "b" : "w";
+        setGameOver((prev) => prev ?? describeLiveResult(row, myC));
+        ChessSounds.gameOver();
+      }
+    },
+    [syncTimes, user]
+  );
+
+  // Load the game, subscribe to updates, and poll as a realtime fallback.
+  useEffect(() => {
+    if (!isOnlineMode || !onlineGameId || !user) return;
+    let cancelled = false;
+
+    fetchLiveGame(onlineGameId)
+      .then((row) => {
+        if (cancelled) return;
+        if (!row || (row.white_id !== user.id && row.black_id !== user.id)) {
+          toast.error("Online game not found.");
+          navigate("/play");
+          return;
+        }
+        setBoardFlipped(row.black_id === user.id);
+        syncFromRow(row);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error("Could not load the online game.");
+      });
+
+    const unsubscribe = subscribeToLiveGame(onlineGameId, (row) => {
+      if (!cancelled) syncFromRow(row);
+    });
+    const poll = window.setInterval(() => {
+      fetchLiveGame(onlineGameId)
+        .then((row) => {
+          if (!cancelled && row) syncFromRow(row);
+        })
+        .catch(() => {});
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      window.clearInterval(poll);
+    };
+  }, [isOnlineMode, onlineGameId, user, syncFromRow, navigate]);
+
+  // Either player's flag fell → ask the server to adjudicate the timeout.
+  useEffect(() => {
+    if (!isOnlineMode || !onlineGameId || !flagged || gameOver) return;
+    claimLiveTimeout(onlineGameId);
+  }, [isOnlineMode, onlineGameId, flagged, gameOver]);
+
+  const resignOnline = useCallback(() => {
+    if (!onlineGameId) return;
+    resignLiveGame(onlineGameId).catch(() => toast.error("Could not resign — check your connection."));
+  }, [onlineGameId]);
+
   const makeEngineMove = useCallback(async () => {
     const g0 = gameRef.current;
     if (!engineRef.current || g0.isGameOver() || engineError) return;
@@ -720,12 +861,39 @@ const Game = () => {
   const executeMove = useCallback(
     (from: Square, to: Square, promotion?: string, animate = true) => {
       const mover = game.turn();
+      // Online: only my own color, only while the game is live.
+      if (isOnlineMode && (mover !== myOnlineColor || (liveGameRef.current && liveGameRef.current.status !== "active"))) {
+        return false;
+      }
       const g = new Chess(game.fen());
       const result = g.move({ from, to, promotion: (promotion || undefined) as PieceSymbol | undefined });
 
       if (result) {
         playMoveSound(result, g.isCheck());
         applyIncrement(mover);
+        if (isOnlineMode && onlineGameId) {
+          appliedPliesRef.current += 1; // our echo from the server is a no-op
+          const over = g.isGameOver();
+          const res = over
+            ? g.isCheckmate()
+              ? mover === "w" ? "1-0" : "0-1"
+              : "1/2-1/2"
+            : null;
+          const why = g.isCheckmate()
+            ? "checkmate"
+            : g.isStalemate()
+              ? "stalemate"
+              : g.isThreefoldRepetition()
+                ? "repetition"
+                : g.isInsufficientMaterial()
+                  ? "insufficient material"
+                  : g.isDraw()
+                    ? "draw"
+                    : null;
+          playLiveMove(onlineGameId, `${from}${to}${promotion ?? ""}`, g.fen(), over, res, why).catch(() =>
+            toast.error("Move didn't reach the server — resyncing.")
+          );
+        }
         // Drag moves already travelled under the pointer — only click/engine
         // moves get the slide animation.
         if (animate) pendingSlideRef.current = { from, to };
@@ -742,7 +910,7 @@ const Game = () => {
       }
       return false;
     },
-    [coach, eval_, evalMate, game, applyIncrement],
+    [coach, eval_, evalMate, game, applyIncrement, isOnlineMode, myOnlineColor, onlineGameId],
   );
 
   // chess.com-style slide: after a non-drag move lands, start the moved piece
@@ -820,7 +988,7 @@ const Game = () => {
   // Which color the human at the board may pick up right now. Vs the engine the
   // human is always White; in pass-and-play both players share the device, so
   // it is whoever's turn it is.
-  const movableColor: Color = isFriendMode ? game.turn() : "w";
+  const movableColor: Color = isFriendMode ? game.turn() : isOnlineMode ? myOnlineColor : "w";
 
   const handleSquareClick = (square: Square) => {
     clearAnnotations(); // chess.com behavior: any left click wipes drawings
@@ -988,6 +1156,11 @@ const Game = () => {
   }, [dragging, executeMove, game, validMoves, boardFlipped, positionDragGhost]);
 
   const resetGame = useCallback(() => {
+    // Online games can't be reset locally — a new game means a new opponent.
+    if (isOnlineMode) {
+      navigate("/play");
+      return;
+    }
     setGame(new Chess());
     setSelectedSquare(null);
     setValidMoves([]);
@@ -1179,17 +1352,26 @@ const Game = () => {
 
   const statusText = gameOver
     ? gameOver
-    : engineThinking
-      ? "Stockfish is thinking…"
-      : game.turn() === "w"
-        ? isFriendMode ? "White to move" : "Your turn (White)"
-        : "Black to move";
+    : isOnlineMode
+      ? game.turn() === myOnlineColor
+        ? "Your move"
+        : `Waiting for ${onlineOppName}…`
+      : engineThinking
+        ? "Stockfish is thinking…"
+        : game.turn() === "w"
+          ? isFriendMode ? "White to move" : "Your turn (White)"
+          : "Black to move";
 
   // Unrated modes (casual, pass-and-play) never show an ELO swing.
   const isUnratedMode = isCasualMode || isFriendMode;
   const eloPulse = useMemo(
-    () => (gameOver && !isUnratedMode ? eloPulseForResult(gameOver, difficulty.skill) : 0),
-    [difficulty.skill, gameOver, isUnratedMode]
+    () =>
+      gameOver && !isUnratedMode
+        ? isOnlineMode
+          ? onlineMyDelta ?? 0
+          : eloPulseForResult(gameOver, difficulty.skill)
+        : 0,
+    [difficulty.skill, gameOver, isUnratedMode, isOnlineMode, onlineMyDelta]
   );
   const resultSummary = useMemo(
     () =>
@@ -1350,7 +1532,9 @@ const Game = () => {
             Back
           </Link>
           <h1 className="font-display text-lg font-semibold text-gray-100 sm:text-xl">
-            {isFriendMode ? (
+            {isOnlineMode ? (
+              <>Online <span className="text-primary">vs {onlineOppName}</span></>
+            ) : isFriendMode ? (
               <>Pass &amp; Play <span className="text-primary">vs a Friend</span></>
             ) : (
               <>
@@ -1360,11 +1544,13 @@ const Game = () => {
             )}
           </h1>
           <span className="ml-auto rounded-full border border-border px-3 py-1 font-body text-xs text-muted-foreground">
-            {isFriendMode
-              ? "Local · Unrated"
-              : isCasualMode
-                ? `${difficulty.rating} · Unrated`
-                : `${difficulty.label} (${difficulty.rating})`}
+            {isOnlineMode
+              ? `Rated · ${liveGame ? `${liveGame.time_minutes}+${liveGame.increment_seconds}` : "Live"}`
+              : isFriendMode
+                ? "Local · Unrated"
+                : isCasualMode
+                  ? `${difficulty.rating} · Unrated`
+                  : `${difficulty.label} (${difficulty.rating})`}
           </span>
         </div>
       </nav>
@@ -1373,14 +1559,26 @@ const Game = () => {
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-center">
           {/* ===== Board area — sized to fill the viewport height like chess.com ===== */}
           <div className="order-1 w-full lg:flex-[0_0_auto] lg:w-auto">
-            <div className="mx-auto flex w-full max-w-[min(calc(100vh_-_225px),860px)] flex-col gap-1.5 lg:w-[min(calc(100vh_-_225px),860px)]">
-              {/* Opponent banner (Black — Stockfish, or the friend in pass-and-play) */}
+            <div
+              className="mx-auto flex w-full max-w-[var(--board-cap)] flex-col gap-1.5 lg:w-[var(--board-cap)]"
+              style={{ "--board-cap": `min(calc((100vh - 225px) * ${boardScale / 100}), ${Math.round(860 * (boardScale / 100))}px)` } as React.CSSProperties}
+            >
+              {/* Opponent banner (top): the human opponent online, otherwise Black */}
               <PlayerBanner
-                name={isFriendMode ? "Black" : namedBot ? namedBot.name : "Stockfish"}
-                rating={isFriendMode ? undefined : difficulty.rating}
-                subtitle={isFriendMode ? "Pass & Play" : `${engineLabel} · ${difficulty.label}`}
+                name={
+                  isOnlineMode ? onlineOppName : isFriendMode ? "Black" : namedBot ? namedBot.name : "Stockfish"
+                }
+                rating={
+                  isOnlineMode ? (onlineOppRating != null ? String(onlineOppRating) : undefined)
+                    : isFriendMode ? undefined : difficulty.rating
+                }
+                subtitle={
+                  isOnlineMode
+                    ? oppOnlineColor === "w" ? "White" : "Black"
+                    : isFriendMode ? "Pass & Play" : `${engineLabel} · ${difficulty.label}`
+                }
                 avatar={
-                  isFriendMode ? (
+                  isFriendMode || isOnlineMode ? (
                     <User className="h-5 w-5" />
                   ) : namedBot ? (
                     <PhilosopherAvatar botId={namedBot.id} size={36} />
@@ -1388,13 +1586,13 @@ const Game = () => {
                     <Bot className="h-5 w-5" />
                   )
                 }
-                color="b"
-                captured={material.capturedByBlack}
-                advantage={blackAdvantage}
-                isActive={gameTurn === "b" && !gameOver}
+                color={isOnlineMode ? oppOnlineColor : "b"}
+                captured={isOnlineMode && oppOnlineColor === "w" ? material.capturedByWhite : material.capturedByBlack}
+                advantage={isOnlineMode && oppOnlineColor === "w" ? whiteAdvantage : blackAdvantage}
+                isActive={gameTurn === (isOnlineMode ? oppOnlineColor : "b") && !gameOver}
                 isThinking={isEngineOpponent && engineThinking}
-                clockMs={blackMs}
-                flagged={flagged === "b"}
+                clockMs={isOnlineMode && oppOnlineColor === "w" ? whiteMs : blackMs}
+                flagged={flagged === (isOnlineMode ? oppOnlineColor : "b")}
               />
 
               {/* Eval bar + board */}
@@ -1442,7 +1640,7 @@ const Game = () => {
                           className={`relative flex select-none items-center justify-center ${
                             isDark ? "bg-chess-dark" : "bg-chess-light"
                           } ${
-                            piece && piece.color === movableColor && (isFriendMode || game.turn() === "w") && !gameOver && !viewFen
+                            piece && piece.color === movableColor && game.turn() === movableColor && !gameOver && !viewFen
                               ? "cursor-grab"
                               : "cursor-pointer"
                           }`}
@@ -1745,15 +1943,23 @@ const Game = () => {
                 </div>
               </div>
 
-              {/* Player banner (White / You) */}
+              {/* Player banner (bottom): you */}
               <PlayerBanner
                 name={
                   isFriendMode
                     ? "White"
                     : profile?.display_name || profile?.username || "You"
                 }
-                rating={isUnratedMode ? undefined : playerElo}
-                subtitle={isFriendMode ? "Pass & Play" : "White"}
+                rating={
+                  isOnlineMode
+                    ? onlineMyRating != null ? String(onlineMyRating) : undefined
+                    : isUnratedMode ? undefined : playerElo
+                }
+                subtitle={
+                  isOnlineMode
+                    ? myOnlineColor === "w" ? "White" : "Black"
+                    : isFriendMode ? "Pass & Play" : "White"
+                }
                 flag={isFriendMode ? undefined : countryFlag(profile?.country) || undefined}
                 avatar={
                   !isFriendMode && profile?.avatar_url ? (
@@ -1767,12 +1973,12 @@ const Game = () => {
                     <User className="h-5 w-5" />
                   )
                 }
-                color="w"
-                captured={material.capturedByWhite}
-                advantage={whiteAdvantage}
-                isActive={gameTurn === "w" && !gameOver}
-                clockMs={whiteMs}
-                flagged={flagged === "w"}
+                color={isOnlineMode ? myOnlineColor : "w"}
+                captured={isOnlineMode && myOnlineColor === "b" ? material.capturedByBlack : material.capturedByWhite}
+                advantage={isOnlineMode && myOnlineColor === "b" ? blackAdvantage : whiteAdvantage}
+                isActive={gameTurn === (isOnlineMode ? myOnlineColor : "w") && !gameOver}
+                clockMs={isOnlineMode && myOnlineColor === "b" ? blackMs : whiteMs}
+                flagged={flagged === (isOnlineMode ? myOnlineColor : "w")}
               />
 
               {/* Move navigation + status */}
@@ -1813,14 +2019,27 @@ const Game = () => {
                 >
                   <ChevronLast className="h-4 w-4 text-muted-foreground" />
                 </button>
-                <button
-                  onClick={resetGame}
-                  className="rounded-lg border border-border bg-card p-2.5 transition-colors hover:bg-secondary"
-                  aria-label="New game"
-                  title="New game"
-                >
-                  <RotateCcw className="h-4 w-4 text-muted-foreground" />
-                </button>
+                {isOnlineMode && !gameOver ? (
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Resign this game?")) resignOnline();
+                    }}
+                    className="rounded-lg border border-destructive/50 bg-card p-2.5 transition-colors hover:bg-destructive/10"
+                    aria-label="Resign"
+                    title="Resign"
+                  >
+                    <Flag className="h-4 w-4 text-destructive" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={resetGame}
+                    className="rounded-lg border border-border bg-card p-2.5 transition-colors hover:bg-secondary"
+                    aria-label="New game"
+                    title="New game"
+                  >
+                    <RotateCcw className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                )}
                 <button
                   onClick={() => setBoardFlipped((f) => !f)}
                   className={`rounded-lg border p-2.5 transition-colors ${boardFlipped ? "border-primary/60 bg-primary/10 text-primary" : "border-border bg-card hover:bg-secondary text-muted-foreground"}`}
