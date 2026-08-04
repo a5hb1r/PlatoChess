@@ -100,11 +100,20 @@ const TIME_CATEGORIES = [
 ];
 
 // ── Online matchmaking modal ──────────────────────────────────────────────────
+// Deliberately a SHORT list, and deliberately not the same list as
+// TIME_CATEGORIES above (those launch an offline game vs Stockfish). Matchmaking
+// pairs on an exact (minutes, increment) match, so every extra pool splits an
+// already-small player base. Keep this tight until traffic justifies more.
 const ONLINE_POOLS = [
   { label: "3+2", desc: "Blitz", minutes: 3, increment: 2 },
+  { label: "5+0", desc: "Blitz", minutes: 5, increment: 0 },
   { label: "10+0", desc: "Rapid", minutes: 10, increment: 0 },
   { label: "15+10", desc: "Classical", minutes: 15, increment: 10 },
 ];
+
+/** join_matchmaking sweeps queue rows older than 3 minutes, so refresh our
+ *  enqueued_at well inside that window or we get silently evicted. */
+const REQUEUE_INTERVAL_MS = 60_000;
 
 function OnlineMatchModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
@@ -157,10 +166,18 @@ function OnlineMatchModal({ onClose }: { onClose: () => void }) {
         goToGame(immediate);
         return;
       }
+      let sinceRequeue = 0;
       pollRef.current = window.setInterval(async () => {
         if (!searchingRef.current) return;
         try {
-          const gid = await myActiveGame();
+          sinceRequeue += 2500;
+          // Re-join periodically: join_matchmaking refreshes our enqueued_at
+          // (so the 3-minute sweep can't silently evict us) and returns the
+          // game id if it pairs us in the same call.
+          const gid =
+            sinceRequeue >= REQUEUE_INTERVAL_MS
+              ? ((sinceRequeue = 0), await joinMatchmaking(pool.minutes, pool.increment))
+              : await myActiveGame();
           if (gid && searchingRef.current) {
             searchingRef.current = false;
             if (pollRef.current) window.clearInterval(pollRef.current);
@@ -437,8 +454,14 @@ const Play = () => {
             <div className="w-full max-w-[420px]">
               <DecorativeBoard />
 
-              {/* Time controls below the board */}
+              {/* Quick-play time controls. These start an OFFLINE game vs
+                  Stockfish — online pools live in the matchmaking modal and are
+                  deliberately a shorter list, so label this clearly. */}
               <div className="mt-6 space-y-3">
+                <p className="font-body text-[11px] text-muted-foreground">
+                  Quick play vs Computer — for rated games vs people, use{" "}
+                  <span className="font-semibold text-foreground">Play Online</span>.
+                </p>
                 {TIME_CATEGORIES.map((cat) => (
                   <div key={cat.label}>
                     <p className="flex items-center gap-1.5 font-body text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
