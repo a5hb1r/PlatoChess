@@ -26,6 +26,10 @@ export interface LiveGameRow {
   end_reason: string | null;
   rating_delta_w: number | null;
   rating_delta_b: number | null;
+  /** Terminal result claimed by one player, awaiting the opponent's corroboration. */
+  pending_result: "1-0" | "0-1" | "1/2-1/2" | null;
+  pending_result_by: string | null;
+  pending_result_reason: string | null;
 }
 
 /** Returns a game id if matched immediately (or reconnecting), else null (queued). */
@@ -69,6 +73,20 @@ export async function playLiveMove(
     p_game_over: gameOver,
     p_result: result,
     p_end_reason: endReason,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Corroborate a terminal result the OPPONENT claimed. The server will not
+ * finalise a win/draw on one client's word alone, so the other player's client
+ * independently replays the move list and confirms the same outcome.
+ * Safe to call speculatively — the RPC no-ops unless the claim matches.
+ */
+export async function confirmLiveResult(gameId: string, result: string): Promise<void> {
+  const { error } = await supabase.rpc("confirm_live_result", {
+    p_game_id: gameId,
+    p_result: result,
   });
   if (error) throw error;
 }

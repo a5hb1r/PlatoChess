@@ -74,6 +74,7 @@ import { BoardArrows, type BoardArrow } from "@/components/chess/BoardArrows";
 import { BOARD_SIZE_EVENT, getBoardSize } from "@/lib/board-size";
 import {
   claimLiveTimeout,
+  confirmLiveResult,
   describeLiveResult,
   fetchLiveGame,
   playLiveMove,
@@ -667,6 +668,42 @@ const Game = () => {
         setLastMove(last);
         setHistoryIndex(-1);
         setViewFen(null);
+      }
+
+      // The server refuses to finalise a win/draw on one client's word alone.
+      // If the OPPONENT claimed a terminal result, independently replay the
+      // move list and corroborate it only if we reach the same verdict.
+      if (
+        row.status === "active" &&
+        row.pending_result &&
+        user &&
+        row.pending_result_by &&
+        row.pending_result_by !== user.id
+      ) {
+        const verdict = new Chess();
+        let replayOk = true;
+        for (const uci of row.moves ? row.moves.split(" ") : []) {
+          try {
+            const mv = verdict.move({
+              from: uci.slice(0, 2) as Square,
+              to: uci.slice(2, 4) as Square,
+              promotion: (uci[4] || undefined) as PieceSymbol | undefined,
+            });
+            if (!mv) { replayOk = false; break; }
+          } catch {
+            replayOk = false;
+            break;
+          }
+        }
+        if (replayOk && verdict.isGameOver()) {
+          // After mate, turn() is the side that got mated.
+          const localResult = verdict.isCheckmate()
+            ? verdict.turn() === "w" ? "0-1" : "1-0"
+            : "1/2-1/2";
+          if (localResult === row.pending_result) {
+            confirmLiveResult(row.id, localResult).catch(() => {});
+          }
+        }
       }
 
       // Server-authoritative clocks: stored values are as of last_move_at,

@@ -67,7 +67,8 @@ export function AppLayout({ children }: AppLayoutProps) {
         {/* Logo */}
         <div className="flex h-14 items-center justify-center lg:justify-start lg:px-4 border-b border-border/30 shrink-0">
           <Link to="/dashboard" className="flex items-center gap-2 min-w-0">
-            <LogoMark iconSize="sm" textClass="hidden lg:block text-sm font-bold truncate" />
+            {/* asLink={false} — this Link is the anchor; a nested <a> is invalid HTML. */}
+            <LogoMark asLink={false} iconSize="sm" textClass="hidden lg:block text-sm font-bold truncate" />
           </Link>
         </div>
 
