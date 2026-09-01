@@ -1,4 +1,4 @@
-const CACHE_NAME = 'platochess-v2';
+const CACHE_NAME = 'platochess-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -37,6 +37,18 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (event.request.url.startsWith('chrome-extension://')) return;
   if (event.request.url.includes('/api/')) return;
+  // Skip cross-origin requests — wrapping responses to third parties
+  // (Stripe.js, Supabase, Google Fonts) breaks CORS/CORP and integrity checks.
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) return;
+  // Skip Worker scripts (Stockfish) and WASM — the SW's response.clone() can
+  // strip streaming semantics and Content-Type flags Workers rely on to boot.
+  if (event.request.destination === 'worker'
+      || event.request.destination === 'sharedworker'
+      || event.request.url.includes('/stockfish/')
+      || event.request.url.endsWith('.wasm')) {
+    return;
+  }
 
   event.respondWith(
     fetch(event.request)
