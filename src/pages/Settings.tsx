@@ -27,6 +27,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import type { BoardThemeId } from "@/lib/chess-themes";
 import { pieceUrl, type PieceSetId } from "@/lib/chess-constants";
 import { COUNTRIES, countryFlag, countryName } from "@/lib/countries";
+import { AccountSecuritySection } from "@/components/AccountSecuritySection";
 
 const PREMOVE_STORAGE_KEY = "plato:premove-enabled";
 const PREMOVE_QUEUE_STORAGE_KEY = "plato:queued-premove";
@@ -644,6 +645,8 @@ const Settings = () => {
               </div>
             </div>
           </section>
+
+          <AccountSecuritySection userEmail={user.email ?? ""} />
 
           <section>
             <h2 className="font-display text-lg font-semibold mb-4 flex items-center gap-2">
