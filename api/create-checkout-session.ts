@@ -1,7 +1,7 @@
 import Stripe from 'stripe'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getSupabaseAdminClient, hasSupabaseAdminEnv } from './_lib/supabase-admin'
-import { resolveAuthenticatedUser } from './_lib/resolve-auth-user'
+import { getSupabaseAdminClient, hasSupabaseAdminEnv } from './_lib/supabase-admin.js'
+import { resolveAuthenticatedUser } from './_lib/resolve-auth-user.js'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
 

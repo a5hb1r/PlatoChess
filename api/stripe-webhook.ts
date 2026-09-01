@@ -1,6 +1,6 @@
 import Stripe from 'stripe'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getSupabaseAdminClient, hasSupabaseAdminEnv } from './_lib/supabase-admin'
+import { getSupabaseAdminClient, hasSupabaseAdminEnv } from './_lib/supabase-admin.js'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET

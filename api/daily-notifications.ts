@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getSupabaseAdminClient, hasSupabaseAdminEnv } from "./_lib/supabase-admin";
-import { resolveAuthenticatedUser } from "./_lib/resolve-auth-user";
+import { getSupabaseAdminClient, hasSupabaseAdminEnv } from "./_lib/supabase-admin.js";
+import { resolveAuthenticatedUser } from "./_lib/resolve-auth-user.js";
 
 type NotificationRow = {
   id: string;

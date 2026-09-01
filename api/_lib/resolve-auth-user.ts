@@ -1,5 +1,5 @@
 import type { VercelRequest } from '@vercel/node'
-import { getSupabaseAdminClient, hasSupabaseAdminEnv } from './supabase-admin'
+import { getSupabaseAdminClient, hasSupabaseAdminEnv } from './supabase-admin.js'
 
 export type ResolvedAuthUser = {
   id: string
